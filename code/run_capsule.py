@@ -143,7 +143,6 @@ if __name__ == "__main__":
     study_folder = results_folder / "gt_study"
     # create study
     study = create_study_folder(hybrid_folder, study_folder, debug_cases=DEBUG_CASES)
-    print(study)
 
     print(f"\tRunning comparisons")
     study.run_comparisons()
