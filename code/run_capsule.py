@@ -17,28 +17,30 @@ results_folder = Path("../results")
 FIGSIZE = (12, 7)
 DEBUG_CASES = None
 
-def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=None):
-    gt_sortings_folder = hybrid_folder / "sortings"
-    recordings_folder = hybrid_folder / "recordings"
 
-    case_names = [p.stem for p in gt_sortings_folder.iterdir()]
-    
+def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=None):
+    gt_sortings = [p for p in hybrid_folder.iterdir() if "gt_" in p.name]
+
     sorters = [
         p.name for p in hybrid_folder.iterdir() 
-        if p.name not in ["sortings", "recordings", "figures", "motion"] and p.is_dir()
+        if "motion" not in p.name and p.is_dir()
     ]
     if verbose:
-        print(f"Found {len(case_names)} recordings and {len(sorters)} sorter runs")
+        print(f"Found {len(gt_sortings)} recordings and {len(sorters)} sorter runs")
 
     # create datasets and cases
     datasets = {}
     cases = {}
     if debug_cases is not None:
         print(f"Only loading {debug_cases} debug cases")
-        case_names = sorted(case_names)[:debug_cases]
+        gt_sortings = sorted(gt_sortings)[:debug_cases]
     else:
-        case_names = sorted(case_names)
-    for case_name in case_names:
+        gt_sortings = sorted(gt_sortings)
+    for gt_sorting in gt_sortings:
+        case_name = gt_sorting.name
+        # remove "gt_" from name
+        case_name = case_name[3:]
+        case_name = case_name[:case_name.find(".pkl")]
         if verbose:
             print(f"\tLoading case {case_name}")
         case_name_split = case_name.split("_")
@@ -49,10 +51,10 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
         if verbose:
             print(f"\t\tLoading GT sorting")
         sorting = si.load_extractor(
-            gt_sortings_folder / f"{case_name}.pkl",
+            gt_sorting,
             base_folder=data_folder
         )
-        with open(recordings_folder / f"job_{case_name}.pkl", "rb") as f:
+        with open(hybrid_folder / f"job_{case_name}.pkl", "rb") as f:
             dump_dict = pickle.load(f)
             recording_dict = dump_dict["recording_dict"]
             if verbose:
@@ -122,26 +124,45 @@ if __name__ == "__main__":
 
     # find hybrid folder
     hybrid_folder = None
-    if (data_folder / "sortings").is_dir():
+    gt_files = [p for p in data_folder.iterdir() if "gt_" in p.name]
+    if len(gt_files) > 0:
         hybrid_folder = data_folder
 
     if hybrid_folder is None:
         # look for subfolder
         subfolders = [p for p in data_folder.iterdir() if p.is_dir()]
-        for p in subfolders:
-            if p.is_dir() and (p / "sortings").is_dir():
-                hybrid_folder = p
+        for subfolder in subfolders:
+            gt_files = [p for p in subfolder.iterdir() if "gt_" in p.name]
+            if len(gt_files) > 0:
+                hybrid_folder = subfolder
                 break
 
     assert hybrid_folder is not None, "Couldn't find hybrid folder"
     print(f"Hybrid folder: {hybrid_folder}")
 
-    for folder_name in ("figures", "motion"):
-        if (hybrid_folder / folder_name).is_dir():
-            shutil.copytree(hybrid_folder / folder_name, results_folder / folder_name)
+    # Copy figures and motion folders
+    figures_output_folder = results_folder / "figures"
+    figures_output_folder.mkdir(exist_ok=True)
+    fig_files = [f for f in hybrid_folder.iterdir() if f.is_file() and f.name.startswith("fig-")]
+    for fig_file in fig_files:
+        # file name is "fig-{type}"
+        fig_file_split = fig_file.name.split("_")
+        _, folder_name = fig_file_split[0].split("-")
+        (figures_output_folder / folder_name).mkdir(exist_ok=True)
+        fig_name = "_".join(fig_file_split[1:])
+        shutil.copyfile(fig_file, figures_output_folder / folder_name / fig_name)
 
+    motion_folders = [f for f in hybrid_folder.iterdir() if f.is_dir() and f.name.startswith("motion")]
+    if len(motion_folders) > 0:
+        motion_output_folder = results_folder / "motion"
+        motion_output_folder.mkdir(exist_ok=True)
+
+        for motion_folder in motion_folders:
+            stream_name = "_".join(motion_folder.name.split("_")[1:])
+            shutil.copytree(motion_folder, motion_output_folder / stream_name)
+
+    # Create study
     study_folder = results_folder / "gt_study"
-    # create study
     study = create_study_folder(hybrid_folder, study_folder, debug_cases=DEBUG_CASES)
 
     print(f"\tRunning comparisons")
@@ -154,24 +175,21 @@ if __name__ == "__main__":
 
     # plotting section
     print(f"\nPlotting results")
-    figures_folder = results_folder / "figures"
-    figures_folder.mkdir(exist_ok=True)
     # motion
     case_keys = list(study.cases.keys())
 
-    if (hybrid_folder / "motion").is_dir():
+    if len(motion_folders) > 0:
         print("\tRaster maps")
-        rasters_folder = figures_folder / "rasters"
+        rasters_folder = figures_output_folder / "rasters"
         rasters_folder.mkdir(exist_ok=True)
         
         for case_key in case_keys:
             print(f"\t\tCase: {case_key}")
             stream_name = case_key[1]
-            motion_info = spre.load_motion_info(hybrid_folder / "motion" / stream_name)
+            motion_info = spre.load_motion_info(hybrid_folder / f"motion_{stream_name}")
             analyzer_gt = study.get_sorting_analyzer(case_key)
             recording = analyzer_gt.recording
             analyzer_gt.compute("spike_locations", save=False)
-            print(f"\t\tPlotting")
             w = sw.plot_drift_raster_map(
                 peaks=motion_info["peaks"],
                 peak_locations=motion_info["peak_locations"],
@@ -202,7 +220,7 @@ if __name__ == "__main__":
         print("\tNo motion found. Skipping raster maps")
 
     print("\tPerformances")
-    benchmark_folder = figures_folder / "benchmark"
+    benchmark_folder = figures_output_folder / "benchmark"
     benchmark_folder.mkdir(exist_ok=True)
 
     w_perf = sw.plot_study_performances(study, levels=("sorter", "complexity"), figsize=FIGSIZE)
