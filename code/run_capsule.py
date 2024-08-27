@@ -82,13 +82,19 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
                     log = json.load(f)
                     sorter_name = log["sorter_name"]
                 datasets[case_name] = (recording, sorting)
-                cases[(sorter, stream_name, complexity, case)] = {
-                    "label": f"{sorter_name}_{case_name}",
-                    "dataset": case_name,
-                    "run_sorter_params": {
-                        "sorter_name": sorter_name,
+                # only add case if sorting output is complete
+                try:
+                    sorting = si.load_extractor(sorter_folder)
+                    cases[(sorter, stream_name, complexity, case)] = {
+                        "label": f"{sorter_name}_{case_name}",
+                        "dataset": case_name,
+                        "run_sorter_params": {
+                            "sorter_name": sorter_name,
+                        }
                     }
-                }
+                except:
+                    print(f"\t\t\tFailed to load sorter {sorter}")
+
     if study_folder.is_dir():
         shutil.rmtree(study_folder)
     if verbose:
