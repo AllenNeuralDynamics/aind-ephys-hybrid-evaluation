@@ -190,7 +190,7 @@ if __name__ == "__main__":
         rasters_folder.mkdir(exist_ok=True)
         
         for case_key in case_keys:
-            print(f"\t\tCase: {case_key}")
+            print(f"\t\tCase: {study.key_to_str(case_key)}")
             stream_name = case_key[1]
             motion_info = spre.load_motion_info(hybrid_folder / f"motion_{stream_name}")
             analyzer_gt = study.get_sorting_analyzer(case_key)
