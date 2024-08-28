@@ -5,6 +5,6 @@ set -e
 pip uninstall -y spikeinterface
 git clone https://github.com/alejoe91/spikeinterface.git
 cd spikeinterface
-git checkout dd11b0b70fc1ce2115d88b3f76c35502d35ed149
+git checkout 1214390d24454e02db9c0085ecbd1d4df2b693b3
 pip install -e .[full,widgets]
 cd ..
