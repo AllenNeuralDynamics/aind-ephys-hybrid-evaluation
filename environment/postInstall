@@ -5,6 +5,6 @@ set -e
 pip uninstall -y spikeinterface
 git clone https://github.com/alejoe91/spikeinterface.git
 cd spikeinterface
-git checkout gtstudy-levels
+git checkout dd11b0b70fc1ce2115d88b3f76c35502d35ed149
 pip install -e .[full,widgets]
 cd ..
