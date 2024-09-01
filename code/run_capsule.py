@@ -1,4 +1,5 @@
 """ top level run script """
+import argparse
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -17,27 +18,35 @@ results_folder = Path("../results")
 FIGSIZE = (12, 7)
 DEBUG_CASES = None
 
+# Define argument parser
+parser = argparse.ArgumentParser(description="Evaluate hybrid datasets")
+
+skip_analyzer_group = parser.add_mutually_exclusive_group()
+skip_analyzer_help = "Whether to skip sorting analyzer computation and related analysis"
+skip_analyzer_group.add_argument("--skip-analyzer", action="store_true", help=skip_analyzer_help)
+skip_analyzer_group.add_argument("static_skip_analyzer", nargs="?", default="false", help=skip_analyzer_help)
+
 
 def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=None):
-    gt_sortings = [p for p in hybrid_folder.iterdir() if "gt_" in p.name]
+    gt_sorting_paths = [p for p in hybrid_folder.iterdir() if "gt_" in p.name]
 
     sorters = [
         p.name for p in hybrid_folder.iterdir() 
         if "motion" not in p.name and p.is_dir()
     ]
     if verbose:
-        print(f"Found {len(gt_sortings)} recordings and {len(sorters)} sorter runs")
+        print(f"Found {len(gt_sorting_paths)} recordings and {len(sorters)} sorter runs")
 
     # create datasets and cases
     datasets = {}
     cases = {}
     if debug_cases is not None:
         print(f"Only loading {debug_cases} debug cases")
-        gt_sortings = sorted(gt_sortings)[:debug_cases]
+        gt_sorting_paths = sorted(gt_sorting_paths)[:debug_cases]
     else:
-        gt_sortings = sorted(gt_sortings)
-    for gt_sorting in gt_sortings:
-        case_name = gt_sorting.name
+        gt_sorting_paths = sorted(gt_sorting_paths)
+    for gt_sorting_path in gt_sorting_paths:
+        case_name = gt_sorting_path.name
         # remove "gt_" from name
         case_name = case_name[3:]
         case_name = case_name[:case_name.find(".pkl")]
@@ -50,8 +59,8 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
 
         if verbose:
             print(f"\t\tLoading GT sorting")
-        sorting = si.load_extractor(
-            gt_sorting,
+        gt_sorting = si.load_extractor(
+            gt_sorting_path,
             base_folder=data_folder
         )
         with open(hybrid_folder / f"job_{case_name}.pkl", "rb") as f:
@@ -81,7 +90,7 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
                 with open(sorter_folder / "spikeinterface_log.json") as f:
                     log = json.load(f)
                     sorter_name = log["sorter_name"]
-                datasets[case_name] = (recording, sorting)
+                datasets[case_name] = (recording, gt_sorting)
                 # only add case if sorting output is complete
                 try:
                     sorting = si.load_extractor(sorter_folder)
@@ -126,6 +135,10 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
 
 
 if __name__ == "__main__":
+    args = parser.parse_args()
+
+    SKIP_ANALYZER = args.skip_analyzer or args.static_skip_analyzer == "true"
+
     si.set_global_job_kwargs(n_jobs=-1, progress_bar=False)
 
     # find hybrid folder
@@ -174,70 +187,80 @@ if __name__ == "__main__":
     print(f"\tRunning comparisons")
     study.run_comparisons()
 
-    print(f"\tCreating GT sorting analyzers")
-    study.create_sorting_analyzer_gt()
-    print(f"\tComputing metrics")
-    study.compute_metrics(metric_names=["snr"])
+    if not SKIP_ANALYZER:
+        print(f"\tCreating GT sorting analyzers")
+        study.create_sorting_analyzer_gt()
+        print(f"\tComputing metrics")
+        study.compute_metrics(metric_names=["snr"])
+    else:
+        print(f"\tSkipping computation of sorting analyzers and metrics")
 
     # plotting section
     print(f"\nPlotting results")
     # motion
     case_keys = list(study.cases.keys())
 
-    if len(motion_folders) > 0:
-        print("\tRaster maps")
-        rasters_folder = figures_output_folder / "rasters"
-        rasters_folder.mkdir(exist_ok=True)
-        
-        for case_key in case_keys:
-            print(f"\t\tCase: {study.key_to_str(case_key)}")
-            stream_name = case_key[1]
-            motion_info = spre.load_motion_info(hybrid_folder / f"motion_{stream_name}")
-            analyzer_gt = study.get_sorting_analyzer(case_key)
-            recording = analyzer_gt.recording
-            analyzer_gt.compute("spike_locations", save=False)
-            w = sw.plot_drift_raster_map(
-                peaks=motion_info["peaks"],
-                peak_locations=motion_info["peak_locations"],
-                recording=recording,
-                cmap="Greys_r",
-                scatter_decimate=10,
-            )
-            ax = w.ax
-            analyzer = study
-            _ = sw.plot_drift_raster_map(
-                sorting_analyzer=analyzer_gt,
-                color_amplitude=False,
-                color="b",
-                scatter_decimate=10,
-                ax=w.ax
-            )
-            ax.set_title(case_key)
+    if not SKIP_ANALYZER:
+        if len(motion_folders) > 0:
+            print("\tRaster maps")
+            rasters_folder = figures_output_folder / "rasters"
+            rasters_folder.mkdir(exist_ok=True)
+            
+            for case_key in case_keys:
+                print(f"\t\tCase: {study.key_to_str(case_key)}")
+                stream_name = case_key[1]
+                motion_info = spre.load_motion_info(hybrid_folder / f"motion_{stream_name}")
+                analyzer_gt = study.get_sorting_analyzer(case_key)
+                recording = analyzer_gt.recording
+                analyzer_gt.compute("spike_locations", save=False)
+                w = sw.plot_drift_raster_map(
+                    peaks=motion_info["peaks"],
+                    peak_locations=motion_info["peak_locations"],
+                    recording=recording,
+                    cmap="Greys_r",
+                    scatter_decimate=10,
+                )
+                ax = w.ax
+                analyzer = study
+                _ = sw.plot_drift_raster_map(
+                    sorting_analyzer=analyzer_gt,
+                    color_amplitude=False,
+                    color="b",
+                    scatter_decimate=10,
+                    ax=w.ax
+                )
+                ax.set_title(case_key)
 
-            motion = motion_info["motion"]
-            _ = ax.plot(
-                motion.temporal_bins_s[0],
-                motion.spatial_bins_um + motion.displacement[0],
-                color="y",
-                alpha=0.5
-            )
-            w.figure.savefig(rasters_folder / f"{case_key}.png", dpi=300)
+                motion = motion_info["motion"]
+                _ = ax.plot(
+                    motion.temporal_bins_s[0],
+                    motion.spatial_bins_um + motion.displacement[0],
+                    color="y",
+                    alpha=0.5
+                )
+                w.figure.savefig(rasters_folder / f"{case_key}.png", dpi=300)
+        else:
+            print("\tNo motion found. Skipping raster maps")
     else:
-        print("\tNo motion found. Skipping raster maps")
+        print(f"\tSkipping drift maps plots")
 
     print("\tPerformances")
     benchmark_folder = figures_output_folder / "benchmark"
     benchmark_folder.mkdir(exist_ok=True)
 
     w_perf = sw.plot_study_performances(study, levels=("sorter", "complexity"), figsize=FIGSIZE)
-    w_snr = sw.plot_study_performances(study, levels=("sorter", "complexity"), mode="snr", figsize=FIGSIZE)   
-    w_count = sw.plot_study_unit_counts(study, levels=("sorter", "complexity"), figsize=FIGSIZE)
-    w_run_times = sw.plot_study_run_times(study, levels=("sorter", "complexity"), figsize=FIGSIZE)
-
     w_perf.figure.savefig(benchmark_folder / "performances_ordered.pdf")
-    w_snr.figure.savefig(benchmark_folder / "performance_snr.pdf")
+
+    w_count = sw.plot_study_unit_counts(study, levels=("sorter", "complexity"), figsize=FIGSIZE)
     w_count.figure.savefig(benchmark_folder / "unit_counts.pdf")
+
+    w_run_times = sw.plot_study_run_times(study, levels=("sorter", "complexity"), figsize=FIGSIZE)
     w_run_times.figure.savefig(benchmark_folder / "run_times.pdf")
+
+    if not SKIP_ANALYZER:
+        w_snr = sw.plot_study_performances(study, levels=("sorter", "complexity"), mode="snr", figsize=FIGSIZE)   
+        w_snr.figure.savefig(benchmark_folder / "performance_snr.pdf")
+
 
     print("\tCopying dataframes")
     dataframes_folder = results_folder / "dataframes"
@@ -246,10 +269,11 @@ if __name__ == "__main__":
     unit_counts.to_csv(dataframes_folder / "unit_counts.csv")
     performances = study.get_performance_by_unit()
     performances.to_csv(dataframes_folder / "performances.csv")
-    metrics = study.get_metrics()
-    metrics.to_csv(dataframes_folder / "metrics.csv")
     run_times = study.get_run_times()
-    metrics.to_csv(dataframes_folder / "run_times.csv")
+    run_times.to_csv(dataframes_folder / "run_times.csv")
+    if not SKIP_ANALYZER:
+        metrics = study.get_metrics()
+        metrics.to_csv(dataframes_folder / "metrics.csv")
     
     print("DONE!")
 
