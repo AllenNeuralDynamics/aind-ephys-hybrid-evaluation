@@ -53,8 +53,7 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
         if verbose:
             print(f"\tLoading case {case_name}")
         case_name_split = case_name.split("_")
-        stream_name = "_".join(case_name_split[:-2])
-        complexity = case_name.split("_")[-2]
+        stream_name = "_".join(case_name_split[:-1])
         case = case_name.split("_")[-1]
 
         if verbose:
@@ -94,7 +93,7 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
                 # only add case if sorting output is complete
                 try:
                     sorting = si.load_extractor(sorter_folder)
-                    cases[(sorter, stream_name, complexity, case)] = {
+                    cases[(sorter, stream_name, case)] = {
                         "label": f"{sorter_name}_{case_name}",
                         "dataset": case_name,
                         "run_sorter_params": {
@@ -109,14 +108,14 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
     if verbose:
         print(f"Creating GT study")
     study = sc.GroundTruthStudy.create(study_folder, datasets=datasets, cases=cases,
-                                       levels=["sorter", "stream", "complexity", "case"])
+                                       levels=["sorter", "stream", "case"])
 
     # copy sortings
     if verbose:
         print(f"Copying and loading sorted data")
     for key, case_dict in cases.items():
         target_sorting_folder = study_folder / "sortings" / study.key_to_str(key)
-        sorter, stream_name_abbr, complexity, case = key
+        sorter, stream_name_abbr, case = key
         case_name = case_dict["dataset"]
         existing_sorter_folder = hybrid_folder / sorter / f"spikesorted_{case_name}"
 
@@ -248,17 +247,19 @@ if __name__ == "__main__":
     benchmark_folder = figures_output_folder / "benchmark"
     benchmark_folder.mkdir(exist_ok=True)
 
-    w_perf = sw.plot_study_performances(study, levels=("sorter", "complexity"), figsize=FIGSIZE)
+    levels = "sorter"
+
+    w_perf = sw.plot_study_performances(study, levels=levels, figsize=FIGSIZE)
     w_perf.figure.savefig(benchmark_folder / "performances_ordered.pdf")
 
-    w_count = sw.plot_study_unit_counts(study, levels=("sorter", "complexity"), figsize=FIGSIZE)
+    w_count = sw.plot_study_unit_counts(study, levels=levels, figsize=FIGSIZE)
     w_count.figure.savefig(benchmark_folder / "unit_counts.pdf")
 
-    w_run_times = sw.plot_study_run_times(study, levels=("sorter", "complexity"), figsize=FIGSIZE)
+    w_run_times = sw.plot_study_run_times(study, levels=levels, figsize=FIGSIZE)
     w_run_times.figure.savefig(benchmark_folder / "run_times.pdf")
 
     if not SKIP_ANALYZER:
-        w_snr = sw.plot_study_performances(study, levels=("sorter", "complexity"), mode="snr", figsize=FIGSIZE)   
+        w_snr = sw.plot_study_performances(study, levels=levels, mode="snr", figsize=FIGSIZE)   
         w_snr.figure.savefig(benchmark_folder / "performance_snr.pdf")
 
 
