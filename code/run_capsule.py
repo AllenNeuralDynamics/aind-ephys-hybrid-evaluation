@@ -247,7 +247,7 @@ if __name__ == "__main__":
     benchmark_folder = figures_output_folder / "benchmark"
     benchmark_folder.mkdir(exist_ok=True)
 
-    levels = "sorter"
+    levels = ["sorter"]
 
     w_perf = sw.plot_study_performances(study, levels=levels, figsize=FIGSIZE)
     w_perf.figure.savefig(benchmark_folder / "performances_ordered.pdf")
