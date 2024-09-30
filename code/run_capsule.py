@@ -1,4 +1,8 @@
 """ top level run script """
+import warnings
+
+warnings.filterwarnings("ignore")
+
 import argparse
 from pathlib import Path
 import numpy as np
@@ -17,14 +21,6 @@ results_folder = Path("../results")
 
 FIGSIZE = (12, 7)
 DEBUG_CASES = None
-
-# Define argument parser
-parser = argparse.ArgumentParser(description="Evaluate hybrid datasets")
-
-skip_analyzer_group = parser.add_mutually_exclusive_group()
-skip_analyzer_help = "Whether to skip sorting analyzer computation and related analysis"
-skip_analyzer_group.add_argument("--skip-analyzer", action="store_true", help=skip_analyzer_help)
-skip_analyzer_group.add_argument("static_skip_analyzer", nargs="?", default="false", help=skip_analyzer_help)
 
 
 def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=None):
@@ -130,14 +126,22 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
         if existing_log_file.is_file():
             shutil.copyfile(existing_log_file, log_file)
 
+    if verbose:
+        dataset_keys = [study.cases[key]["dataset"] for key in study.cases.keys()]
+        dataset_keys = set(dataset_keys)
+        analyzer_folders_found = False
+        for case_name in dataset_keys:
+            existing_analyzer_folder = hybrid_folder / f"analyzer_{case_name}"
+            target_analyzer_folder = study_folder / "sorting_analyzer" / study.key_to_str(case_name)
+            if existing_analyzer_folder.is_dir():
+                analyzer_folders_found = True
+                shutil.copytree(existing_analyzer_folder, target_analyzer_folder)
+        if analyzer_folders_found:
+            print(f"Copied analyzer folders")
     return study
 
 
 if __name__ == "__main__":
-    args = parser.parse_args()
-
-    SKIP_ANALYZER = args.skip_analyzer or args.static_skip_analyzer == "true"
-
     si.set_global_job_kwargs(n_jobs=-1, progress_bar=False)
 
     # find hybrid folder
@@ -186,62 +190,10 @@ if __name__ == "__main__":
     print(f"\tRunning comparisons")
     study.run_comparisons()
 
-    if not SKIP_ANALYZER:
-        print(f"\tCreating GT sorting analyzers")
-        study.create_sorting_analyzer_gt()
-        print(f"\tComputing metrics")
-        study.compute_metrics(metric_names=["snr"])
-    else:
-        print(f"\tSkipping computation of sorting analyzers and metrics")
-
     # plotting section
     print(f"\nPlotting results")
     # motion
     case_keys = list(study.cases.keys())
-
-    if not SKIP_ANALYZER:
-        if len(motion_folders) > 0:
-            print("\tRaster maps")
-            rasters_folder = figures_output_folder / "rasters"
-            rasters_folder.mkdir(exist_ok=True)
-            
-            for case_key in case_keys:
-                print(f"\t\tCase: {study.key_to_str(case_key)}")
-                stream_name = case_key[1]
-                motion_info = spre.load_motion_info(hybrid_folder / f"motion_{stream_name}")
-                analyzer_gt = study.get_sorting_analyzer(case_key)
-                recording = analyzer_gt.recording
-                analyzer_gt.compute("spike_locations", save=False)
-                w = sw.plot_drift_raster_map(
-                    peaks=motion_info["peaks"],
-                    peak_locations=motion_info["peak_locations"],
-                    recording=recording,
-                    cmap="Greys_r",
-                    scatter_decimate=10,
-                )
-                ax = w.ax
-                analyzer = study
-                _ = sw.plot_drift_raster_map(
-                    sorting_analyzer=analyzer_gt,
-                    color_amplitude=False,
-                    color="b",
-                    scatter_decimate=10,
-                    ax=w.ax
-                )
-                ax.set_title(case_key)
-
-                motion = motion_info["motion"]
-                _ = ax.plot(
-                    motion.temporal_bins_s[0],
-                    motion.spatial_bins_um + motion.displacement[0],
-                    color="y",
-                    alpha=0.5
-                )
-                w.figure.savefig(rasters_folder / f"{case_key}.png", dpi=300)
-        else:
-            print("\tNo motion found. Skipping raster maps")
-    else:
-        print(f"\tSkipping drift maps plots")
 
     print("\tPerformances")
     benchmark_folder = figures_output_folder / "benchmark"
@@ -258,10 +210,14 @@ if __name__ == "__main__":
     w_run_times = sw.plot_study_run_times(study, levels=levels, figsize=FIGSIZE)
     w_run_times.figure.savefig(benchmark_folder / "run_times.pdf")
 
-    if not SKIP_ANALYZER:
+    try:
+        study.compute_metrics(metric_names=["snr"])
         w_snr = sw.plot_study_performances(study, levels=levels, mode="snr", figsize=FIGSIZE)   
         w_snr.figure.savefig(benchmark_folder / "performance_snr.pdf")
-
+        skip_metrics = False
+    except:
+        print("\tAnalyzers are missing, cannot plot performance VS snr")
+        skip_metrics = True
 
     print("\tCopying dataframes")
     dataframes_folder = results_folder / "dataframes"
@@ -272,7 +228,7 @@ if __name__ == "__main__":
     performances.to_csv(dataframes_folder / "performances.csv")
     run_times = study.get_run_times()
     run_times.to_csv(dataframes_folder / "run_times.csv")
-    if not SKIP_ANALYZER:
+    if not skip_metrics:
         metrics = study.get_metrics()
         metrics.to_csv(dataframes_folder / "metrics.csv")
     
