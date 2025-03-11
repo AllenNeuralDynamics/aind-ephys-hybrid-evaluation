@@ -12,9 +12,8 @@ import json
 import shutil
 
 import spikeinterface as si
-import spikeinterface.preprocessing as spre
-import spikeinterface.comparison as sc
 import spikeinterface.widgets as sw
+from spikeinterface.benchmark import SorterStudy
 
 data_folder = Path("../data")
 results_folder = Path("../results")
@@ -103,8 +102,7 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
         shutil.rmtree(study_folder)
     if verbose:
         print(f"Creating GT study")
-    study = sc.GroundTruthStudy.create(study_folder, datasets=datasets, cases=cases,
-                                       levels=["sorter", "stream", "case"])
+    study = SorterStudy(study_folder, datasets=datasets, cases=cases, levels=["sorter", "stream", "case"])
 
     # copy sortings
     if verbose:
