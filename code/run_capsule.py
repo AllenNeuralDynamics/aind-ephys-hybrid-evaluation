@@ -13,7 +13,16 @@ import shutil
 
 import spikeinterface as si
 import spikeinterface.widgets as sw
+import spikeinterface.comparison as sc
 from spikeinterface.benchmark import SorterStudy
+from spikeinterface.benchmark.benchmark_base import _key_separator
+from spikeinterface.benchmark.benchmark_plot_tools import (
+    plot_run_times,
+    plot_performances_ordered,
+    plot_performances_vs_snr,
+    plot_unit_counts,
+    plot_performances_comparison
+)
 
 data_folder = Path("../data")
 results_folder = Path("../results")
@@ -23,11 +32,13 @@ DEBUG_CASES = None
 
 
 def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=None):
+    if study_folder.is_dir():
+        shutil.rmtree(study_folder)
     gt_sorting_paths = [p for p in hybrid_folder.iterdir() if "gt_" in p.name]
 
     sorters = [
         p.name for p in hybrid_folder.iterdir() 
-        if "motion" not in p.name and p.is_dir()
+        if "motion" not in p.name and p.is_dir() and "analyzer" not in p.name
     ]
     if verbose:
         print(f"Found {len(gt_sorting_paths)} recordings and {len(sorters)} sorter runs")
@@ -40,6 +51,8 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
         gt_sorting_paths = sorted(gt_sorting_paths)[:debug_cases]
     else:
         gt_sorting_paths = sorted(gt_sorting_paths)
+
+    analyzers_path = {}
     for gt_sorting_path in gt_sorting_paths:
         case_name = gt_sorting_path.name
         # remove "gt_" from name
@@ -53,30 +66,45 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
 
         if verbose:
             print(f"\t\tLoading GT sorting")
-        gt_sorting = si.load_extractor(
-            gt_sorting_path,
-            base_folder=data_folder
-        )
-        with open(hybrid_folder / f"job_{case_name}.pkl", "rb") as f:
-            dump_dict = pickle.load(f)
-            recording_dict = dump_dict["recording_dict"]
-            if verbose:
-                print(f"\t\tLoading hybrid recording")
-            try:
-                recording = si.load_extractor(recording_dict, base_folder=data_folder)
-            except:
-                from spikeinterface.core.core_tools import SIJsonEncoder, recursive_path_modifier
-                raw_folder_names = [
-                    p.name for p in data_folder.iterdir() 
-                    if "ecephys" in p.name or "behavior" in p.name
-                ]
-                assert len(raw_folder_names) == 1
-                raw_folder_name = raw_folder_names[0]
-                f = lambda x: x.replace("ecephys_session", raw_folder_name)
-                recording_dict = recursive_path_modifier(recording_dict, f)
-                recording = si.load_extractor(recording_dict, base_folder=data_folder)
+        try:
+            gt_sorting = si.load(gt_sorting_path)
+        except:
+            # for back-compatibility
+            gt_sorting = si.load(gt_sorting_path, base_folder=data_folder)
+        analyzer_folder = hybrid_folder / f"analyzer_{case_name}"
+        if analyzer_folder.is_dir():
+            print(f"\t\tLoading analyzer")
+            analyzer = si.load(analyzer_folder, load_extensions=False)
+            # copy analyzer to study folder
+            (study_folder / "sorting_analyzer").mkdir(exist_ok=True, parents=True)
+            shutil.copytree(analyzer.folder, study_folder / "sorting_analyzer" / case_name)
+            # reload from results (not read-only)
+            analyzers_path[case_name] = str((study_folder / "sorting_analyzer" / case_name).resolve())
 
-        
+            if not analyzer.has_recording():
+                with open(hybrid_folder / f"job_{case_name}.pkl", "rb") as f:
+                    dump_dict = pickle.load(f)
+                    recording_dict = dump_dict["recording_dict"]
+                    if verbose:
+                        print(f"\t\tLoading hybrid recording")
+                    try:
+                        recording = si.load(recording_dict, base_folder=data_folder)
+                    except:
+                        from spikeinterface.core.core_tools import SIJsonEncoder, recursive_path_modifier
+                        raw_folder_names = [
+                            p.name for p in data_folder.iterdir() 
+                            if "ecephys" in p.name or "behavior" in p.name
+                        ]
+                        assert len(raw_folder_names) == 1
+                        raw_folder_name = raw_folder_names[0]
+                        f = lambda x: x.replace("ecephys_session", raw_folder_name)
+                        recording_dict = recursive_path_modifier(recording_dict, f)
+                        recording = si.load(recording_dict, base_folder=data_folder)
+                if analyzer is not None:
+                    analyzer.set_temporary_recording(recording)
+
+        levels = ["sorter", "stream_name", "case"]
+        sortings = {}
         for sorter in sorters:
             sorter_folder = hybrid_folder / sorter / f"spikesorted_{case_name}"
             log_file = sorter_folder / "spikeinterface_log.json"
@@ -84,58 +112,52 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
                 with open(sorter_folder / "spikeinterface_log.json") as f:
                     log = json.load(f)
                     sorter_name = log["sorter_name"]
-                datasets[case_name] = (recording, gt_sorting)
+                    run_time = log["run_time"]
+                datasets[case_name] = analyzer
                 # only add case if sorting output is complete
                 try:
-                    sorting = si.load_extractor(sorter_folder)
-                    cases[(sorter, stream_name, case)] = {
+                    sorting = si.load(sorter_folder)
+                    case_key = (sorter, stream_name, case)
+                    cases[case_key] = {
                         "label": f"{sorter_name}_{case_name}",
                         "dataset": case_name,
-                        "run_sorter_params": {
+                        "params": {
                             "sorter_name": sorter_name,
                         }
                     }
-                except:
-                    print(f"\t\t\tFailed to load sorter {sorter}")
+                    # copy result
+                    (study_folder / "results").mkdir(exist_ok=True, parents=True)
+                    case_path_name = _key_separator.join([str(k) for k in case_key])
+                    result_folder = study_folder / "results" / case_path_name
+                    sorting.save(folder=result_folder / "sorting")
+                    # dump run time
+                    with open(result_folder / "run_time.pickle", mode="wb") as f:
+                        pickle.dump(run_time, f)
+                    sortings[case_key] = sorting
+                    # perform gt comparison and dump
+                    cmp = sc.compare_sorter_to_ground_truth(gt_sorting, sorting, exhaustive_gt=False)
+                    with open(result_folder / "gt_comparison.pickle", mode="wb") as f:
+                        pickle.dump(cmp, f)
+                except Exception as e:
+                    print(f"\t\t\tFailed to load sorter {sorter}:\n\n{e}")
 
-    if study_folder.is_dir():
-        shutil.rmtree(study_folder)
+                    
+        # study metadata
+        # analyzer path (local or external)
+        (study_folder / "analyzers_path.json").write_text(json.dumps(analyzers_path, indent=4), encoding="utf8")
+
+        info = {}
+        info["levels"] = levels
+        (study_folder / "info.json").write_text(json.dumps(info, indent=4), encoding="utf8")
+
+        # cases is dumped to a pickle file, json is not possible because of the tuple key
+        (study_folder / "cases.pickle").write_bytes(pickle.dumps(cases))
+
     if verbose:
         print(f"Creating GT study")
-    study = SorterStudy(study_folder, datasets=datasets, cases=cases, levels=["sorter", "stream", "case"])
 
-    # copy sortings
-    if verbose:
-        print(f"Copying and loading sorted data")
-    for key, case_dict in cases.items():
-        target_sorting_folder = study_folder / "sortings" / study.key_to_str(key)
-        sorter, stream_name_abbr, case = key
-        case_name = case_dict["dataset"]
-        existing_sorter_folder = hybrid_folder / sorter / f"spikesorted_{case_name}"
+    study = SorterStudy(study_folder, benchmark_kwargs=dict(exhaustive_gt=False))
 
-        shutil.copytree(existing_sorter_folder, target_sorting_folder)
-        log_file = study_folder / "sortings" / "run_logs" / f"{study.key_to_str(key)}.json"
-
-        sorting = si.load_extractor(target_sorting_folder)
-        study.sortings[key] = sorting
-
-        # copy logs
-        existing_log_file = existing_sorter_folder / "spikeinterface_log.json"
-        if existing_log_file.is_file():
-            shutil.copyfile(existing_log_file, log_file)
-
-    if verbose:
-        dataset_keys = [study.cases[key]["dataset"] for key in study.cases.keys()]
-        dataset_keys = set(dataset_keys)
-        analyzer_folders_found = False
-        for case_name in dataset_keys:
-            existing_analyzer_folder = hybrid_folder / f"analyzer_{case_name}"
-            target_analyzer_folder = study_folder / "sorting_analyzer" / study.key_to_str(case_name)
-            if existing_analyzer_folder.is_dir():
-                analyzer_folders_found = True
-                shutil.copytree(existing_analyzer_folder, target_analyzer_folder)
-        if analyzer_folders_found:
-            print(f"Copied analyzer folders")
     return study
 
 
@@ -185,9 +207,6 @@ if __name__ == "__main__":
     study_folder = results_folder / "gt_study"
     study = create_study_folder(hybrid_folder, study_folder, debug_cases=DEBUG_CASES)
 
-    print(f"\tRunning comparisons")
-    study.run_comparisons()
-
     # plotting section
     print(f"\nPlotting results")
     # motion
@@ -199,23 +218,22 @@ if __name__ == "__main__":
 
     levels = ["sorter"]
 
-    w_perf = sw.plot_study_performances(study, levels=levels, figsize=FIGSIZE)
-    w_perf.figure.savefig(benchmark_folder / "performances_ordered.pdf")
+    fig_perf = plot_performances_ordered(study, levels_to_keep=levels, figsize=FIGSIZE)
+    fig_perf.savefig(benchmark_folder / "performances_ordered.pdf")
 
-    w_count = sw.plot_study_unit_counts(study, levels=levels, figsize=FIGSIZE)
-    w_count.figure.savefig(benchmark_folder / "unit_counts.pdf")
+    fig_count = plot_unit_counts(study, levels_to_keep=levels, figsize=FIGSIZE)
+    fig_count.savefig(benchmark_folder / "unit_counts.pdf")
 
-    w_run_times = sw.plot_study_run_times(study, levels=levels, figsize=FIGSIZE)
-    w_run_times.figure.savefig(benchmark_folder / "run_times.pdf")
+    fig_run_times = plot_run_times(study, levels_to_keep=levels, figsize=FIGSIZE)
+    fig_run_times.savefig(benchmark_folder / "run_times.pdf")
 
-    try:
-        study.compute_metrics(metric_names=["snr"])
-        w_snr = sw.plot_study_performances(study, levels=levels, mode="snr", figsize=FIGSIZE)   
-        w_snr.figure.savefig(benchmark_folder / "performance_snr.pdf")
-        skip_metrics = False
-    except:
-        print("\tAnalyzers are missing, cannot plot performance VS snr")
-        skip_metrics = True
+    fig_comparison = plot_performances_comparison(study, levels_to_keep=levels, figsize=FIGSIZE)
+    fig_comparison.savefig(benchmark_folder / "comparison.pdf")
+
+    study.compute_metrics(metric_names=["snr"])
+    fig_snr = plot_performances_vs_snr(study, levels_to_keep=levels, figsize=FIGSIZE)   
+    fig_snr.savefig(benchmark_folder / "performance_snr.pdf")
+    skip_metrics = False
 
     print("\tCopying dataframes")
     dataframes_folder = results_folder / "dataframes"
@@ -226,9 +244,8 @@ if __name__ == "__main__":
     performances.to_csv(dataframes_folder / "performances.csv")
     run_times = study.get_run_times()
     run_times.to_csv(dataframes_folder / "run_times.csv")
-    if not skip_metrics:
-        metrics = study.get_metrics()
-        metrics.to_csv(dataframes_folder / "metrics.csv")
+    metrics = study.get_all_metrics()
+    metrics.to_csv(dataframes_folder / "metrics.csv")
     
     print("DONE!")
 
