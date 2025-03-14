@@ -212,7 +212,6 @@ if __name__ == "__main__":
     # motion
     case_keys = list(study.cases.keys())
 
-    print("\tPerformances")
     benchmark_folder = figures_output_folder / "benchmark"
     benchmark_folder.mkdir(exist_ok=True)
 
@@ -235,7 +234,7 @@ if __name__ == "__main__":
     fig_snr.savefig(benchmark_folder / "performance_snr.pdf")
     skip_metrics = False
 
-    print("\tCopying dataframes")
+    print("Copying dataframes")
     dataframes_folder = results_folder / "dataframes"
     dataframes_folder.mkdir(exist_ok=True)
     unit_counts = study.get_count_units()
