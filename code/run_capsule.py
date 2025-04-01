@@ -156,9 +156,9 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
     if verbose:
         print(f"Creating GT study")
 
-    study = SorterStudy(study_folder, benchmark_kwargs=dict(exhaustive_gt=False))
+    study = SorterStudy(study_folder)
 
-    return study
+    return study, sorters
 
 
 if __name__ == "__main__":
@@ -205,7 +205,7 @@ if __name__ == "__main__":
 
     # Create study
     study_folder = results_folder / "gt_study"
-    study = create_study_folder(hybrid_folder, study_folder, debug_cases=DEBUG_CASES)
+    study, sorter_names = create_study_folder(hybrid_folder, study_folder, debug_cases=DEBUG_CASES)
 
     # plotting section
     print(f"\nPlotting results")
@@ -217,7 +217,13 @@ if __name__ == "__main__":
 
     levels = ["sorter"]
 
-    fig_perf = plot_performances_ordered(study, levels_to_keep=levels, figsize=FIGSIZE)
+    colors = {}
+    for i, sorter in enumerate(sorter_names):
+        colors[sorter] = f"C{i}"
+
+    study.set_colors(colors, levels_to_group_by=levels)
+
+    fig_perf = plot_performances_ordered(study, levels_to_keep=levels, orientation="horizontal", figsize=FIGSIZE)
     fig_perf.savefig(benchmark_folder / "performances_ordered.pdf")
 
     fig_count = plot_unit_counts(study, levels_to_keep=levels, figsize=FIGSIZE)
@@ -230,7 +236,7 @@ if __name__ == "__main__":
     fig_comparison.savefig(benchmark_folder / "comparison.pdf")
 
     study.compute_metrics(metric_names=["snr"])
-    fig_snr = plot_performances_vs_snr(study, levels_to_keep=levels, figsize=FIGSIZE)   
+    fig_snr = plot_performances_vs_snr(study, levels_to_keep=levels, orientation="horizontal", figsize=FIGSIZE)   
     fig_snr.savefig(benchmark_folder / "performance_snr.pdf")
     skip_metrics = False
 
