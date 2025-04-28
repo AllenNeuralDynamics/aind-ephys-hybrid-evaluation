@@ -82,6 +82,7 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
             analyzers_path[case_name] = str((study_folder / "sorting_analyzer" / case_name).resolve())
 
             if not analyzer.has_recording():
+                print(f"\t\tAnalyzer couldn't load recording. Loading from .pkl")
                 with open(hybrid_folder / f"job_{case_name}.pkl", "rb") as f:
                     dump_dict = pickle.load(f)
                     recording_dict = dump_dict["recording_dict"]
@@ -89,7 +90,8 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
                         print(f"\t\tLoading hybrid recording")
                     try:
                         recording = si.load(recording_dict, base_folder=data_folder)
-                    except:
+                    except Exception as e:
+                        print(f"Analyzer couldn't load recording. Trying remapping:\n{e}")
                         from spikeinterface.core.core_tools import SIJsonEncoder, recursive_path_modifier
                         raw_folder_names = [
                             p.name for p in data_folder.iterdir() 

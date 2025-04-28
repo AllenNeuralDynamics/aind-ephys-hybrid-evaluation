@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-set -e
-
-git clone https://github.com/alejoe91/spikeinterface.git
-cd spikeinterface
-git checkout 78aa1e4fb1e0d2277800f45c763faa43edf7e1f7
-pip install .[full]
-cd ..
