@@ -71,15 +71,19 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
         except:
             # for back-compatibility
             gt_sorting = si.load(gt_sorting_path, base_folder=data_folder)
+
         analyzer_folder = hybrid_folder / f"analyzer_{case_name}"
+        should_add_subfolder = False
+
+        # in this case we have to 
+        if analyzer_folder.parent.resolve() == data_folder.resolve():
+            should_add_subfolder = True
+
         if analyzer_folder.is_dir():
             print(f"\t\tLoading analyzer")
             analyzer = si.load(analyzer_folder, load_extensions=False)
             # copy analyzer to study folder
             (study_folder / "sorting_analyzer").mkdir(exist_ok=True, parents=True)
-            shutil.copytree(analyzer.folder, study_folder / "sorting_analyzer" / case_name)
-            # reload from results (not read-only)
-            analyzers_path[case_name] = str((study_folder / "sorting_analyzer" / case_name).resolve())
 
             if not analyzer.has_recording():
                 print(f"\t\tAnalyzer couldn't load recording. Loading from .pkl")
@@ -103,7 +107,14 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
                         recording_dict = recursive_path_modifier(recording_dict, f)
                         recording = si.load(recording_dict, base_folder=data_folder)
                 if analyzer is not None:
-                    analyzer.set_temporary_recording(recording)
+                    analyzer._recording = recording
+
+            analyzer_study_folder = study_folder / "sorting_analyzer" / case_name
+            analyzer.save_as(format="binary_folder", folder=analyzer_study_folder)
+            # we need to add the extensions folder to avoid loading in memory
+            shutil.copytree(analyzer.folder / "extensions", analyzer_study_folder / "extensions")
+            # reload from results (not read-only)
+            analyzers_path[case_name] = str(analyzer_study_folder)
 
         levels = ["sorter", "stream_name", "case"]
         sortings = {}
