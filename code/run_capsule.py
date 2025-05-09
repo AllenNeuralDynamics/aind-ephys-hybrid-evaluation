@@ -148,7 +148,12 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
                         pickle.dump(run_time, f)
                     sortings[case_key] = sorting
                     # perform gt comparison and dump
-                    cmp = sc.compare_sorter_to_ground_truth(gt_sorting, sorting, exhaustive_gt=False)
+                    cmp = sc.compare_sorter_to_ground_truth(
+                        gt_sorting, 
+                        sorting, 
+                        exhaustive_gt=False,
+                        match_score=0.2 # all matches below this are set to 0
+                    )
                     with open(result_folder / "gt_comparison.pickle", mode="wb") as f:
                         pickle.dump(cmp, f)
                 except Exception as e:
