@@ -31,9 +31,9 @@ FIGSIZE = (12, 7)
 DEBUG_CASES = None
 
 
-def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=None):
-    if study_folder.is_dir():
-        shutil.rmtree(study_folder)
+def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_cases=None):
+    if study_base_folder.is_dir():
+        shutil.rmtree(study_base_folder)
     gt_sorting_paths = [p for p in hybrid_folder.iterdir() if "gt_" in p.name]
 
     sorters = [
@@ -52,38 +52,62 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
     else:
         gt_sorting_paths = sorted(gt_sorting_paths)
 
-    analyzers_path = {}
+    data_by_session = {}
     for gt_sorting_path in gt_sorting_paths:
         case_name = gt_sorting_path.name
         # remove "gt_" from name
         case_name = case_name[3:]
         case_name = case_name[:case_name.find(".pkl")]
-        if verbose:
-            print(f"\tLoading case {case_name}")
-        case_name_split = case_name.split("_")
-        stream_name = "_".join(case_name_split[:-1])
-        case = case_name.split("_")[-1]
+        analyzer_folder = hybrid_folder / f"analyzer_{case_name}"
 
         if verbose:
-            print(f"\t\tLoading GT sorting")
+            print(f"\t\tLoading GT sorting for {case_name}")
         try:
             gt_sorting = si.load(gt_sorting_path)
         except:
             # for back-compatibility
             gt_sorting = si.load(gt_sorting_path, base_folder=data_folder)
 
-        analyzer_folder = hybrid_folder / f"analyzer_{case_name}"
-        should_add_subfolder = False
+        # check if session is present
+        session_split = case_name.split("__")
+        if len(session_split) == 2:
+            session_name = session_split[0]
+            case_name = session_split[1]
+        else:
+            session_name = "session1"
+        if session_name not in data_by_session:
+            data_by_session[session_name] = []
+        session_info = dict(
+            gt_sorting=gt_sorting,
+            case_name=case_name,
+            analyzer_folder=analyzer_folder
+        )
+        data_by_session[session_name].append(session_info)
 
-        # in this case we have to 
-        if analyzer_folder.parent.resolve() == data_folder.resolve():
-            should_add_subfolder = True
+    # create GT studies
+    study_dict = {}
+    for session_name, session_info_list in data_by_session.items():
+        if verbose:
+            print(f"\tInstantiating study for session {session_name}")
+        session_study_folder = study_base_folder / session_name
+        analyzers_path = {}
 
-        if analyzer_folder.is_dir():
-            print(f"\t\tLoading analyzer")
+        for session_info in session_info_list:
+            gt_sorting = session_info["gt_sorting"]
+            case_name = session_info["case_name"]
+            analyzer_folder = session_info["analyzer_folder"]
+
+            case_name_split = case_name.split("_")
+            stream_name = "_".join(case_name_split[:-1])
+            case = case_name.split("_")[-1]
+
+            print(f"\t\tLoading analyzer for {case_name}")
             analyzer = si.load(analyzer_folder, load_extensions=False)
             # copy analyzer to study folder
-            (study_folder / "sorting_analyzer").mkdir(exist_ok=True, parents=True)
+            # if session_name == "unknown":
+            #    session_study_folder = study_folder
+            # else:
+            (session_study_folder / "sorting_analyzer").mkdir(exist_ok=True, parents=True)
 
             if not analyzer.has_recording():
                 print(f"\t\tAnalyzer couldn't load recording. Loading from .pkl")
@@ -109,74 +133,75 @@ def create_study_folder(hybrid_folder, study_folder, verbose=True, debug_cases=N
                 if analyzer is not None:
                     analyzer._recording = recording
 
-            analyzer_study_folder = study_folder / "sorting_analyzer" / case_name
+            analyzer_study_folder = session_study_folder / "sorting_analyzer" / case_name
             analyzer.save_as(format="binary_folder", folder=analyzer_study_folder)
             # we need to add the extensions folder to avoid loading in memory
             shutil.copytree(analyzer.folder / "extensions", analyzer_study_folder / "extensions")
             # reload from results (not read-only)
             analyzers_path[case_name] = str(analyzer_study_folder)
 
-        levels = ["sorter", "stream_name", "case"]
-        sortings = {}
-        for sorter in sorters:
-            sorter_folder = hybrid_folder / sorter / f"spikesorted_{case_name}"
-            log_file = sorter_folder / "spikeinterface_log.json"
-            if log_file.is_file():
-                with open(sorter_folder / "spikeinterface_log.json") as f:
-                    log = json.load(f)
-                    sorter_name = log["sorter_name"]
-                    run_time = log["run_time"]
-                datasets[case_name] = analyzer
-                # only add case if sorting output is complete
-                try:
-                    sorting = si.load(sorter_folder)
-                    case_key = (sorter, stream_name, case)
-                    cases[case_key] = {
-                        "label": f"{sorter_name}_{case_name}",
-                        "dataset": case_name,
-                        "params": {
-                            "sorter_name": sorter_name,
+            levels = ["sorter", "stream_name", "case"]
+            sortings = {}
+            for sorter in sorters:
+                sorter_folder = hybrid_folder / sorter / f"spikesorted_{case_name}"
+                log_file = sorter_folder / "spikeinterface_log.json"
+                if log_file.is_file():
+                    with open(sorter_folder / "spikeinterface_log.json") as f:
+                        log = json.load(f)
+                        sorter_name = log["sorter_name"]
+                        run_time = log["run_time"]
+                    datasets[case_name] = analyzer
+                    # only add case if sorting output is complete
+                    try:
+                        sorting = si.load(sorter_folder)
+                        case_key = (sorter, stream_name, case)
+                        cases[case_key] = {
+                            "label": f"{sorter_name}_{case_name}",
+                            "dataset": case_name,
+                            "params": {
+                                "sorter_name": sorter_name,
+                            }
                         }
-                    }
-                    # copy result
-                    (study_folder / "results").mkdir(exist_ok=True, parents=True)
-                    case_path_name = _key_separator.join([str(k) for k in case_key])
-                    result_folder = study_folder / "results" / case_path_name
-                    sorting.save(folder=result_folder / "sorting")
-                    # dump run time
-                    with open(result_folder / "run_time.pickle", mode="wb") as f:
-                        pickle.dump(run_time, f)
-                    sortings[case_key] = sorting
-                    # perform gt comparison and dump
-                    cmp = sc.compare_sorter_to_ground_truth(
-                        gt_sorting, 
-                        sorting, 
-                        exhaustive_gt=False,
-                        match_score=0.2 # all matches below this are set to 0
-                    )
-                    with open(result_folder / "gt_comparison.pickle", mode="wb") as f:
-                        pickle.dump(cmp, f)
-                except Exception as e:
-                    print(f"\t\t\tFailed to load sorter {sorter}:\n\n{e}")
+                        # copy result
+                        (session_study_folder / "results").mkdir(exist_ok=True, parents=True)
+                        case_path_name = _key_separator.join([str(k) for k in case_key])
+                        result_folder = session_study_folder / "results" / case_path_name
+                        sorting.save(folder=result_folder / "sorting")
+                        # dump run time
+                        with open(result_folder / "run_time.pickle", mode="wb") as f:
+                            pickle.dump(run_time, f)
+                        sortings[case_key] = sorting
+                        # perform gt comparison and dump
+                        cmp = sc.compare_sorter_to_ground_truth(
+                            gt_sorting, 
+                            sorting, 
+                            exhaustive_gt=False,
+                            match_score=0.2 # all matches below this are set to 0
+                        )
+                        with open(result_folder / "gt_comparison.pickle", mode="wb") as f:
+                            pickle.dump(cmp, f)
+                    except Exception as e:
+                        print(f"\t\t\tFailed to load sorter {sorter}:\n\n{e}")
 
                     
         # study metadata
         # analyzer path (local or external)
-        (study_folder / "analyzers_path.json").write_text(json.dumps(analyzers_path, indent=4), encoding="utf8")
+        (session_study_folder / "analyzers_path.json").write_text(json.dumps(analyzers_path, indent=4), encoding="utf8")
 
         info = {}
         info["levels"] = levels
-        (study_folder / "info.json").write_text(json.dumps(info, indent=4), encoding="utf8")
+        (session_study_folder / "info.json").write_text(json.dumps(info, indent=4), encoding="utf8")
 
         # cases is dumped to a pickle file, json is not possible because of the tuple key
-        (study_folder / "cases.pickle").write_bytes(pickle.dumps(cases))
+        (session_study_folder / "cases.pickle").write_bytes(pickle.dumps(cases))
 
-    if verbose:
-        print(f"Creating GT study")
+        if verbose:
+            print(f"Creating GT study for session {session_name}")
 
-    study = SorterStudy(study_folder)
+        study = SorterStudy(session_study_folder)
+        study_dict[session_name] = study
 
-    return study, sorters
+    return study_dict, sorters
 
 
 if __name__ == "__main__":
@@ -204,71 +229,87 @@ if __name__ == "__main__":
     figures_output_folder = results_folder / "figures"
     figures_output_folder.mkdir(exist_ok=True)
     fig_files = [f for f in hybrid_folder.iterdir() if f.is_file() and f.name.startswith("fig-")]
-    for fig_file in fig_files:
-        # file name is "fig-{type}"
-        fig_file_split = fig_file.name.split("_")
-        _, folder_name = fig_file_split[0].split("-")
-        (figures_output_folder / folder_name).mkdir(exist_ok=True)
-        fig_name = "_".join(fig_file_split[1:])
-        shutil.copyfile(fig_file, figures_output_folder / folder_name / fig_name)
-
     motion_folders = [f for f in hybrid_folder.iterdir() if f.is_dir() and f.name.startswith("motion")]
-    if len(motion_folders) > 0:
-        motion_output_folder = results_folder / "motion"
-        motion_output_folder.mkdir(exist_ok=True)
-
-        for motion_folder in motion_folders:
-            stream_name = "_".join(motion_folder.name.split("_")[1:])
-            shutil.copytree(motion_folder, motion_output_folder / stream_name)
+    
 
     # Create study
-    study_folder = results_folder / "gt_study"
-    study, sorter_names = create_study_folder(hybrid_folder, study_folder, debug_cases=DEBUG_CASES)
+    study_folder = results_folder / "gt_studies"
+    study_dict, sorter_names = create_study_folders(hybrid_folder, study_folder, debug_cases=DEBUG_CASES)
+    session_names = list(study_dict.keys())
 
     # plotting section
-    print(f"\nPlotting results")
-    # motion
-    case_keys = list(study.cases.keys())
+    for session_name, study in study_dict.items():
+        print(f"\nGenerating results for session {session_name}")
 
-    benchmark_folder = figures_output_folder / "benchmark"
-    benchmark_folder.mkdir(exist_ok=True)
+        print(f"\tPlotting results")
+        # motion
+        case_keys = list(study.cases.keys())
 
-    levels = ["sorter"]
+        benchmark_folder = figures_output_folder / "benchmark" / session_name
+        benchmark_folder.mkdir(exist_ok=True, parents=True)
 
-    colors = {}
-    for i, sorter in enumerate(sorter_names):
-        colors[sorter] = f"C{i}"
+        levels = ["sorter"]
 
-    study.set_colors(colors, levels_to_group_by=levels)
+        colors = {}
+        for i, sorter in enumerate(sorter_names):
+            colors[sorter] = f"C{i}"
 
-    fig_perf = plot_performances_ordered(study, levels_to_keep=levels, orientation="horizontal", figsize=FIGSIZE)
-    fig_perf.savefig(benchmark_folder / "performances_ordered.pdf")
+        study.set_colors(colors, levels_to_group_by=levels)
 
-    fig_count = plot_unit_counts(study, levels_to_keep=levels, figsize=FIGSIZE)
-    fig_count.savefig(benchmark_folder / "unit_counts.pdf")
+        fig_perf = plot_performances_ordered(study, levels_to_keep=levels, orientation="horizontal", figsize=FIGSIZE)
+        fig_perf.savefig(benchmark_folder / "performances_ordered.pdf")
 
-    fig_run_times = plot_run_times(study, levels_to_keep=levels, figsize=FIGSIZE)
-    fig_run_times.savefig(benchmark_folder / "run_times.pdf")
+        fig_count = plot_unit_counts(study, levels_to_keep=levels, figsize=FIGSIZE)
+        fig_count.savefig(benchmark_folder / "unit_counts.pdf")
 
-    fig_comparison = plot_performances_comparison(study, levels_to_keep=levels, figsize=FIGSIZE)
-    fig_comparison.savefig(benchmark_folder / "comparison.pdf")
+        fig_run_times = plot_run_times(study, levels_to_keep=levels, figsize=FIGSIZE)
+        fig_run_times.savefig(benchmark_folder / "run_times.pdf")
 
-    study.compute_metrics(metric_names=["snr"])
-    fig_snr = plot_performances_vs_snr(study, levels_to_keep=levels, orientation="horizontal", figsize=FIGSIZE)   
-    fig_snr.savefig(benchmark_folder / "performance_snr.pdf")
-    skip_metrics = False
+        fig_comparison = plot_performances_comparison(study, levels_to_keep=levels, figsize=FIGSIZE)
+        fig_comparison.savefig(benchmark_folder / "comparison.pdf")
 
-    print("Copying dataframes")
-    dataframes_folder = results_folder / "dataframes"
-    dataframes_folder.mkdir(exist_ok=True)
-    unit_counts = study.get_count_units()
-    unit_counts.to_csv(dataframes_folder / "unit_counts.csv")
-    performances = study.get_performance_by_unit()
-    performances.to_csv(dataframes_folder / "performances.csv")
-    run_times = study.get_run_times()
-    run_times.to_csv(dataframes_folder / "run_times.csv")
-    metrics = study.get_all_metrics()
-    metrics.to_csv(dataframes_folder / "metrics.csv")
+        study.compute_metrics(metric_names=["snr", "isi_violation", "rp_violation"])
+        fig_snr = plot_performances_vs_snr(study, levels_to_keep=levels, orientation="horizontal", figsize=FIGSIZE)   
+        fig_snr.savefig(benchmark_folder / "performance_snr.pdf")
+        skip_metrics = False
+
+        print("\tCopying dataframes")
+        dataframes_folder = results_folder / "dataframes" / session_name
+        dataframes_folder.mkdir(exist_ok=True, parents=True)
+        unit_counts = study.get_count_units()
+        unit_counts.to_csv(dataframes_folder / "unit_counts.csv")
+        performances = study.get_performance_by_unit()
+        performances.to_csv(dataframes_folder / "performances.csv")
+        run_times = study.get_run_times()
+        run_times.to_csv(dataframes_folder / "run_times.csv")
+        metrics = study.get_all_metrics()
+        metrics.to_csv(dataframes_folder / "metrics.csv")
+    
+        print("\tCopying motion folders and figures")
+        for fig_file in fig_files:
+            # file name is "fig-{type}"
+            fig_file_split = fig_file.name.split("_")
+            _, folder_name = fig_file_split[0].split("-")
+            fig_name = "_".join(fig_file_split[1:])
+            if len(session_names) > 1:
+                if session_name not in fig_name:
+                    continue
+                fig_name = fig_name.replace(session_name, "")
+            output_folder = figures_output_folder / folder_name / session_name
+            output_folder.mkdir(exist_ok=True, parents=True)
+            shutil.copyfile(fig_file, output_folder / fig_name)
+
+        if len(motion_folders) > 0:
+            motion_output_folder = results_folder / "motion" / session_name
+            motion_output_folder.mkdir(exist_ok=True, parents=True)
+
+            for motion_folder in motion_folders:
+                stream_name = "_".join(motion_folder.name.split("_")[1:])
+                if len(session_names) > 1:
+                    if session_name not in stream_name:
+                        continue
+                    stream_name = stream_name.replace(session_name, "")
+                shutil.copytree(motion_folder, motion_output_folder / stream_name)
     
     print("DONE!")
 
