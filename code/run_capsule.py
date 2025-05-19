@@ -54,11 +54,10 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
 
     data_by_session = {}
     for gt_sorting_path in gt_sorting_paths:
-        case_name = gt_sorting_path.name
+        full_case_name = gt_sorting_path.name
         # remove "gt_" from name
-        case_name = case_name[3:]
+        case_name = full_case_name[3:]
         case_name = case_name[:case_name.find(".pkl")]
-        analyzer_folder = hybrid_folder / f"analyzer_{case_name}"
 
         if verbose:
             print(f"\t\tLoading GT sorting for {case_name}")
@@ -80,7 +79,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
         session_info = dict(
             gt_sorting=gt_sorting,
             case_name=case_name,
-            analyzer_folder=analyzer_folder
+            case_name_with_session=full_case_name
         )
         data_by_session[session_name].append(session_info)
 
@@ -95,7 +94,9 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
         for session_info in session_info_list:
             gt_sorting = session_info["gt_sorting"]
             case_name = session_info["case_name"]
-            analyzer_folder = session_info["analyzer_folder"]
+            case_name_with_session = session_info["case_name_with_session"]
+            analyzer_folder = hybrid_folder / f"analyzer_{case_name_with_session}"
+            recording_file = hybrid_folder / f"job_{case_name_with_session}.pkl"
 
             case_name_split = case_name.split("_")
             stream_name = "_".join(case_name_split[:-1])
@@ -103,15 +104,11 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
 
             print(f"\t\tLoading analyzer for {case_name}")
             analyzer = si.load(analyzer_folder, load_extensions=False)
-            # copy analyzer to study folder
-            # if session_name == "unknown":
-            #    session_study_folder = study_folder
-            # else:
             (session_study_folder / "sorting_analyzer").mkdir(exist_ok=True, parents=True)
 
             if not analyzer.has_recording():
                 print(f"\t\tAnalyzer couldn't load recording. Loading from .pkl")
-                with open(hybrid_folder / f"job_{case_name}.pkl", "rb") as f:
+                with open(recording_file, "rb") as f:
                     dump_dict = pickle.load(f)
                     recording_dict = dump_dict["recording_dict"]
                     if verbose:
@@ -143,7 +140,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
             levels = ["sorter", "stream_name", "case"]
             sortings = {}
             for sorter in sorters:
-                sorter_folder = hybrid_folder / sorter / f"spikesorted_{case_name}"
+                sorter_folder = hybrid_folder / sorter / f"spikesorted_{case_name_with_session}"
                 log_file = sorter_folder / "spikeinterface_log.json"
                 if log_file.is_file():
                     with open(sorter_folder / "spikeinterface_log.json") as f:
@@ -310,6 +307,8 @@ if __name__ == "__main__":
                         continue
                     stream_name = stream_name.replace(session_name, "")
                 shutil.copytree(motion_folder, motion_output_folder / stream_name)
+
+    # TODO: add aggregated results
     
     print("DONE!")
 
