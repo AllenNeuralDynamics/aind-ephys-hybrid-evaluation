@@ -54,10 +54,11 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
 
     data_by_session = {}
     for gt_sorting_path in gt_sorting_paths:
-        full_case_name = gt_sorting_path.name
         # remove "gt_" from name
+        full_case_name = gt_sorting_path.name
         case_name = full_case_name[3:]
         case_name = case_name[:case_name.find(".pkl")]
+        full_case_name = case_name
 
         if verbose:
             print(f"\t\tLoading GT sorting for {case_name}")
