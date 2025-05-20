@@ -10,12 +10,15 @@ import pandas as pd
 import pickle
 import json
 import shutil
+from itertools import combinations
+from functools import reduce
 
 import spikeinterface as si
 import spikeinterface.widgets as sw
 import spikeinterface.comparison as sc
 from spikeinterface.benchmark import SorterStudy
 from spikeinterface.benchmark.benchmark_base import _key_separator
+from spikeinterface.benchmark.benchmark_tools import fit_sigmoid, sigmoid
 from spikeinterface.benchmark.benchmark_plot_tools import (
     plot_run_times,
     plot_performances_ordered,
@@ -23,6 +26,9 @@ from spikeinterface.benchmark.benchmark_plot_tools import (
     plot_unit_counts,
     plot_performances_comparison
 )
+
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 data_folder = Path("../data")
 results_folder = Path("../results")
@@ -41,13 +47,13 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
         p for p in hybrid_folder.iterdir() 
         if "motion" not in p.name and p.is_dir() and "analyzer" not in p.name
     ]
-    sorters = []
+    sorting_cases = []
     for possible_sorter_folder in possible_sorter_folders:
         spikesorted_folders = [p for p in possible_sorter_folder.iterdir() if p.name.startswith("spikesorted")]
         if len(spikesorted_folders) > 0:
-            sorters.append(possible_sorter_folder.name)
+            sorting_cases.append(possible_sorter_folder.name)
     print(f"Found {len(gt_sorting_paths)} hybrid GT datasets")
-    print(f"Sorters: {sorters}")
+    print(f"Spike sorting cases: {sorting_cases}")
 
     # create datasets and cases
     if debug_cases is not None:
@@ -65,7 +71,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
         full_case_name = case_name
 
         if verbose:
-            print(f"\t\tLoading GT sorting for {case_name}")
+            print(f"\tLoading GT sorting for {case_name}")
         try:
             gt_sorting = si.load(gt_sorting_path)
         except:
@@ -90,6 +96,8 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
 
     # create GT studies
     study_dict = {}
+    levels = ["sorting_case", "stream_name", "case"]
+
     for session_name, session_info_list in data_by_session.items():
         if verbose:
             print(f"Instantiating study for session {session_name}")
@@ -108,7 +116,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
             stream_name = "_".join(case_name_split[:-1])
             case = case_name.split("_")[-1]
 
-            print(f"\t\tLoading analyzer for {case_name}")
+            print(f"\tLoading analyzer for {case_name}")
             analyzer = si.load(analyzer_folder, load_extensions=False)
             (session_study_folder / "sorting_analyzer").mkdir(exist_ok=True, parents=True)
 
@@ -142,10 +150,9 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
             # reload from results (not read-only)
             analyzers_path[case_name] = str(analyzer_study_folder)
 
-            levels = ["sorter", "stream_name", "case"]
             sortings = {}
-            for sorter in sorters:
-                sorter_folder = hybrid_folder / sorter / f"spikesorted_{case_name_with_session}"
+            for sorting_case in sorting_cases:
+                sorter_folder = hybrid_folder / sorting_case / f"spikesorted_{case_name_with_session}"
                 log_file = sorter_folder / "spikeinterface_log.json"
                 if log_file.is_file():
                     with open(sorter_folder / "spikeinterface_log.json") as f:
@@ -156,9 +163,9 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
                     # only add case if sorting output is complete
                     try:
                         sorting = si.load(sorter_folder)
-                        case_key = (sorter, stream_name, case)
+                        case_key = (sorting_case, stream_name, case)
                         cases[case_key] = {
-                            "label": f"{sorter_name}_{case_name}",
+                            "label": f"{sorting_case}_{case_name}",
                             "dataset": case_name,
                             "params": {
                                 "sorter_name": sorter_name,
@@ -183,7 +190,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
                         with open(result_folder / "gt_comparison.pickle", mode="wb") as f:
                             pickle.dump(cmp, f)
                     except Exception as e:
-                        print(f"\t\t\tFailed to load sorter {sorter}:\n\n{e}")
+                        print(f"\t\tFailed to load sorting case {sorting_case}:\n\n{e}")
 
                     
         # study metadata
@@ -203,7 +210,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
         study = SorterStudy(session_study_folder)
         study_dict[session_name] = study
 
-    return study_dict, sorters
+    return study_dict, sorting_cases
 
 
 if __name__ == "__main__":
@@ -236,10 +243,16 @@ if __name__ == "__main__":
 
     # Create study
     study_folder = results_folder / "gt_studies"
-    study_dict, sorter_names = create_study_folders(hybrid_folder, study_folder, debug_cases=DEBUG_CASES)
+    study_dict, sorting_cases = create_study_folders(hybrid_folder, study_folder, debug_cases=DEBUG_CASES)
     session_names = list(study_dict.keys())
 
+    colors = {}
+    for i, sorting_case in enumerate(sorting_cases):
+        colors[sorting_case] = f"C{i}"
+
     # plotting section
+    dataframes = {}
+
     for session_name, study in study_dict.items():
         print(f"\nGenerating results for session {session_name}")
 
@@ -250,11 +263,7 @@ if __name__ == "__main__":
         benchmark_folder = figures_output_folder / "benchmark" / session_name
         benchmark_folder.mkdir(exist_ok=True, parents=True)
 
-        levels = ["sorter"]
-
-        colors = {}
-        for i, sorter in enumerate(sorter_names):
-            colors[sorter] = f"C{i}"
+        levels = ["sorting_case"]
 
         study.set_colors(colors, levels_to_group_by=levels)
 
@@ -313,7 +322,138 @@ if __name__ == "__main__":
                     stream_name = stream_name.replace(session_name, "")
                 shutil.copytree(motion_folder, motion_output_folder / stream_name)
 
-    # TODO: add aggregated results
+        # each dataset has the same duration per session
+        dataset_keys = list(study.datasets.keys())
+        recording, _ = study.datasets[dataset_keys[0]]
+        session_duration = recording.get_total_duration()
+        probes_info = recording.get_annotation("probes_info")
+        if probes_info is not None and len(probes_info) == 1:
+            probe_model_name = probes_info[0].get("model_name", "unknown")
+        else:
+            probe_model_name = "unknown"
+        print(f"\tSession duration: {session_duration} - Probe model: {probe_model_name}")
+        csvs = [p for p in dataframes_folder.iterdir() if p.suffix == ".csv"]
+        for csv_file in csvs:
+            df_name = csv_file.stem
+            df = pd.read_csv(csv_file)
+            df.loc[:, "session"] = session_name
+            df.loc[:, "duration"] = session_duration
+            df.loc[:, "probe"] = probe_model_name
+
+            if df_name not in dataframes:
+                dataframes[df_name] = df
+            else:
+                dataframes[df_name] = pd.concat([dataframes[df_name], df])
+
+    # Aggregated results
+    print("Aggregating results")
+    performance_metrics = ["accuracy", "precision", "recall"]
+    aggregated_results_folder = results_folder / "aggregated"
+    df_units = pd.merge(dataframes["performances"], dataframes["metrics"])
+    df_counts = dataframes["unit_counts"]
+    df_run_times = dataframes["run_times"]
+
+    dataframes_folder = aggregated_results_folder / "dataframes"
+    dataframes_folder.mkdir(parents=True)
+    for df_name, df in dataframes.items():
+        df.to_csv(dataframes_folder / f"{df_name}.csv")
+
+    # performance
+    figures_folder = aggregated_results_folder / "figures"
+    figures_folder.mkdir(parents=True)
+
+    fig_perf, axes = plt.subplots(ncols=len(performance_metrics), figsize=(10,5), sharey=True)
+    num_hybrid_units = int(len(df_units) / len(sorting_cases))
+
+    for i, metric in enumerate(performance_metrics):
+        df_units_sorted = df_units.sort_values(["sorting_case", metric], ascending=False)
+        df_units_sorted.loc[:, "unit_index"] = np.arange(len(df_units_sorted)) % num_hybrid_units
+        ax = axes[i]
+        sns.lineplot(data=df_units_sorted, x="unit_index", y=metric, hue="sorting_case", ax=ax, palette=colors, lw=2.5)
+        ax.set_title(metric.capitalize())
+        if i > 0:
+            ax.legend().remove()
+        ax.set_xlabel("")
+    axes[0].set_ylabel("Value", fontsize=15)
+    axes[1].set_xlabel("Sorted units", fontsize=15)
+    sns.despine(fig_perf)
+    fig_perf.suptitle(f"# Units: {num_hybrid_units}", fontsize=18)
+    fig_perf.savefig(figures_folder / f"performance_ordered.pdf")
+
+    # unit counts and run times
+    fig_counts_rt, axes = plt.subplots(ncols=2, figsize=(12, 6))
+    ax_counts = axes[0]
+    sns.boxenplot(data=df_counts, hue="sorting_case", y="num_well_detected", ax=ax_counts, palette=colors)
+    ax_counts.axhline(10, color="gray", ls="--")
+    ax_counts.set_ylabel("# Units > 80% accuracy")
+    ax_counts.set_title("Well detected units per session")
+
+    ax_run_times = axes[1]
+    df_run_times.loc[:, "run_time_rel"] = df_run_times["run_times"] / df_run_times["duration"]
+    sns.boxenplot(data=df_run_times, hue="sorting_case", y="run_time_rel", ax=ax_run_times, palette=colors)
+    ax_run_times.set_ylabel("Runtime / Duration")
+    ax_run_times.set_title("Speed")
+    sns.despine(fig_counts_rt)
+
+    fig_counts_rt.savefig(figures_folder / f"unit_counts_run_times.pdf")
+
+    fig_snr, axes = plt.subplots(ncols=len(performance_metrics), figsize=(12, 5), sharey=True)
+    for i, metric in enumerate(performance_metrics):
+        ax = axes[i]
+        sns.scatterplot(data=df_units, x="snr", y=metric, hue="sorting_case", ax=ax, alpha=0.5, palette=colors)
+        ax.set_title(metric.capitalize())
+        if i > 0:
+            ax.legend().remove()
+        ax.set_xlabel("")
+
+        for i, sorting_case in enumerate(sorting_cases):
+            df_sorter = df_units.query(f"sorting_case == '{sorting_case}'")
+            xdata = df_sorter["snr"].values
+            sort_indices = np.argsort(xdata)
+            xdata = xdata[sort_indices]
+            ydata = df_sorter[metric].values[sort_indices]
+            p0 = [np.median(xdata), 1, 0]
+            popt = fit_sigmoid(xdata, ydata, p0=p0)
+            ax.plot(xdata, sigmoid(xdata, *popt), color=f"C{i}", lw=2)
+    axes[0].set_ylabel("Value")
+    axes[1].set_xlabel("SNR")
+    sns.despine(fig_snr)
+
+    fig_snr.suptitle(f"Performance VS SNR (# Units: {num_hybrid_units})")
+    fig_snr.savefig(figures_folder / f"performance_vs_snr.pdf")
+
+    # pairwise metric scatter
+    pairs = combinations(sorting_cases, 2)
+    on = ["stream_name", "case", "probe", "gt_unit_id"]
+    for pair in pairs:
+        sorting_case1, sorting_case2 = pair
+        dfs_to_merge = [df_units.query(f"sorting_case == '{sorting_case}'") for sorting_case in pair]
+        df_merged = reduce(lambda  left, right: pd.merge(left, right, on=on, how='outer'), dfs_to_merge)
+
+        mapper = {}
+        for col in df_merged:
+            if "_x" in col:
+                mapper[col] = col.replace("_x", f"_{sorting_case1}")
+            elif "_y" in col:
+                mapper[col] = col.replace("_y", f"_{sorting_case2}")
+        df_merged = df_merged.rename(columns=mapper)
+
+        fig_pair, axes = plt.subplots(ncols=len(performance_metrics), figsize=(12, 5), sharey=True)
+
+        for i, metric in enumerate(performance_metrics):
+            ax = axes[i]
+            sns.scatterplot(data=df_merged, x=f"{metric}_{sorting_case1}", y=f"{metric}_{sorting_case2}", ax=ax, color=f"C{i}")
+            ax.set_title(metric.capitalize())
+            if i > 0:
+                ax.legend().remove()
+            ax.set_xlabel("")
+            ax.plot([0, 1],[0, 1], color="grey", ls="--", alpha=0.5)
+        axes[0].set_ylabel(sorting_case2)
+        axes[1].set_xlabel(sorting_case1)
+        sns.despine(fig_pair)
+        
+        fig_pair.suptitle(f"{sorting_case1} vs {sorting_case2} (# Units: {num_hybrid_units})")
+        fig_pair.savefig(figures_folder / f"{sorting_case1}_vs_{sorting_case2}.png", dpi=300)
     
     print("DONE!")
 
