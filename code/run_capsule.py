@@ -36,11 +36,17 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
         shutil.rmtree(study_base_folder)
     gt_sorting_paths = [p for p in hybrid_folder.iterdir() if "gt_" in p.name]
 
-    sorters = [
-        p.name for p in hybrid_folder.iterdir() 
+    # Look for sorters
+    possible_sorter_folders = [
+        p for p in hybrid_folder.iterdir() 
         if "motion" not in p.name and p.is_dir() and "analyzer" not in p.name
     ]
-    print(f"Found {len(gt_sorting_paths)} hybrid GT")
+    sorters = []
+    for possible_sorter_folder in possible_sorter_folders:
+        spikesorted_folders = [p for p in possible_sorter_folder.iterdir() if p.name.startswith("spikesorted")]
+        if len(spikesorted_folders) > 0:
+            sorters.append(possible_sorter_folder.name)
+    print(f"Found {len(gt_sorting_paths)} hybrid GT datasets")
     print(f"Sorters: {sorters}")
 
     # create datasets and cases
