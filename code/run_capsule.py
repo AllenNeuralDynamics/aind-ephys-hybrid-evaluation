@@ -50,8 +50,6 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
     print(f"Sorters: {sorters}")
 
     # create datasets and cases
-    datasets = {}
-    cases = {}
     if debug_cases is not None:
         print(f"Only loading {debug_cases} debug cases")
         gt_sorting_paths = sorted(gt_sorting_paths)[:debug_cases]
@@ -97,6 +95,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
             print(f"Instantiating study for session {session_name}")
         session_study_folder = study_base_folder / session_name
         analyzers_path = {}
+        cases = {}
 
         for session_info in session_info_list:
             gt_sorting = session_info["gt_sorting"]
@@ -153,7 +152,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
                         log = json.load(f)
                         sorter_name = log["sorter_name"]
                         run_time = log["run_time"]
-                    datasets[case_name] = analyzer
+
                     # only add case if sorting output is complete
                     try:
                         sorting = si.load(sorter_folder)
