@@ -40,8 +40,8 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
         p.name for p in hybrid_folder.iterdir() 
         if "motion" not in p.name and p.is_dir() and "analyzer" not in p.name
     ]
-    if verbose:
-        print(f"Found {len(gt_sorting_paths)} recordings and {len(sorters)} sorter runs")
+    print(f"Found {len(gt_sorting_paths)} hybrid GT")
+    print(f"Sorters: {sorters}")
 
     # create datasets and cases
     datasets = {}
@@ -51,8 +51,6 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
         gt_sorting_paths = sorted(gt_sorting_paths)[:debug_cases]
     else:
         gt_sorting_paths = sorted(gt_sorting_paths)
-
-    print(f"Found {len(gt_sorting_paths)} hybrid-GT sortings")
 
     data_by_session = {}
     for gt_sorting_path in gt_sorting_paths:
