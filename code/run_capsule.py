@@ -52,6 +52,8 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
     else:
         gt_sorting_paths = sorted(gt_sorting_paths)
 
+    print(f"Found {len(gt_sorting_paths)} hybrid-GT sortings")
+
     data_by_session = {}
     for gt_sorting_path in gt_sorting_paths:
         # remove "gt_" from name
@@ -88,7 +90,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
     study_dict = {}
     for session_name, session_info_list in data_by_session.items():
         if verbose:
-            print(f"\tInstantiating study for session {session_name}")
+            print(f"Instantiating study for session {session_name}")
         session_study_folder = study_base_folder / session_name
         analyzers_path = {}
 
@@ -108,7 +110,6 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
             (session_study_folder / "sorting_analyzer").mkdir(exist_ok=True, parents=True)
 
             if not analyzer.has_recording():
-                print(f"\t\tAnalyzer couldn't load recording. Loading from .pkl")
                 with open(recording_file, "rb") as f:
                     dump_dict = pickle.load(f)
                     recording_dict = dump_dict["recording_dict"]
