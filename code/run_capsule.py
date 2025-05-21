@@ -276,8 +276,9 @@ if __name__ == "__main__":
         fig_run_times = plot_run_times(study, levels_to_keep=levels, figsize=FIGSIZE)
         fig_run_times.savefig(benchmark_folder / "run_times.pdf")
 
-        fig_comparison = plot_performances_comparison(study, levels_to_keep=levels, figsize=FIGSIZE)
-        fig_comparison.savefig(benchmark_folder / "comparison.pdf")
+        if len(sorting_cases) > 1:
+            fig_comparison = plot_performances_comparison(study, levels_to_keep=levels, figsize=FIGSIZE)
+            fig_comparison.savefig(benchmark_folder / "comparison.pdf")
 
         study.compute_metrics(metric_names=["snr", "isi_violation", "rp_violation"])
         fig_snr = plot_performances_vs_snr(study, levels_to_keep=levels, orientation="horizontal", figsize=FIGSIZE)   
@@ -423,37 +424,38 @@ if __name__ == "__main__":
     fig_snr.savefig(figures_folder / f"performance_vs_snr.pdf")
 
     # pairwise metric scatter
-    pairs = combinations(sorting_cases, 2)
-    on = ["stream_name", "case", "probe", "gt_unit_id"]
-    for pair in pairs:
-        sorting_case1, sorting_case2 = pair
-        dfs_to_merge = [df_units.query(f"sorting_case == '{sorting_case}'") for sorting_case in pair]
-        df_merged = reduce(lambda  left, right: pd.merge(left, right, on=on, how='outer'), dfs_to_merge)
+    if len(sorting_cases) > 1:
+        pairs = combinations(sorting_cases, 2)
+        on = ["stream_name", "case", "probe", "gt_unit_id"]
+        for pair in pairs:
+            sorting_case1, sorting_case2 = pair
+            dfs_to_merge = [df_units.query(f"sorting_case == '{sorting_case}'") for sorting_case in pair]
+            df_merged = reduce(lambda  left, right: pd.merge(left, right, on=on, how='outer'), dfs_to_merge)
 
-        mapper = {}
-        for col in df_merged:
-            if "_x" in col:
-                mapper[col] = col.replace("_x", f"_{sorting_case1}")
-            elif "_y" in col:
-                mapper[col] = col.replace("_y", f"_{sorting_case2}")
-        df_merged = df_merged.rename(columns=mapper)
+            mapper = {}
+            for col in df_merged:
+                if "_x" in col:
+                    mapper[col] = col.replace("_x", f"_{sorting_case1}")
+                elif "_y" in col:
+                    mapper[col] = col.replace("_y", f"_{sorting_case2}")
+            df_merged = df_merged.rename(columns=mapper)
 
-        fig_pair, axes = plt.subplots(ncols=len(performance_metrics), figsize=(12, 5), sharey=True)
+            fig_pair, axes = plt.subplots(ncols=len(performance_metrics), figsize=(12, 5), sharey=True)
 
-        for i, metric in enumerate(performance_metrics):
-            ax = axes[i]
-            sns.scatterplot(data=df_merged, x=f"{metric}_{sorting_case1}", y=f"{metric}_{sorting_case2}", ax=ax, color=f"C{i}")
-            ax.set_title(metric.capitalize())
-            if i > 0:
-                ax.legend().remove()
-            ax.set_xlabel("")
-            ax.plot([0, 1],[0, 1], color="grey", ls="--", alpha=0.5)
-        axes[0].set_ylabel(sorting_case2)
-        axes[1].set_xlabel(sorting_case1)
-        sns.despine(fig_pair)
-        
-        fig_pair.suptitle(f"{sorting_case1} vs {sorting_case2} (# Units: {num_hybrid_units})")
-        fig_pair.savefig(figures_folder / f"{sorting_case1}_vs_{sorting_case2}.png", dpi=300)
+            for i, metric in enumerate(performance_metrics):
+                ax = axes[i]
+                sns.scatterplot(data=df_merged, x=f"{metric}_{sorting_case1}", y=f"{metric}_{sorting_case2}", ax=ax, color=f"C{i}")
+                ax.set_title(metric.capitalize())
+                if i > 0:
+                    ax.legend().remove()
+                ax.set_xlabel("")
+                ax.plot([0, 1],[0, 1], color="grey", ls="--", alpha=0.5)
+            axes[0].set_ylabel(sorting_case2)
+            axes[1].set_xlabel(sorting_case1)
+            sns.despine(fig_pair)
+
+            fig_pair.suptitle(f"{sorting_case1} vs {sorting_case2} (# Units: {num_hybrid_units})")
+            fig_pair.savefig(figures_folder / f"{sorting_case1}_vs_{sorting_case2}.png", dpi=300)
     
     print("DONE!")
 
