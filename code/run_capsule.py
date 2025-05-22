@@ -414,8 +414,11 @@ if __name__ == "__main__":
             xdata = xdata[sort_indices]
             ydata = df_sorter[metric].values[sort_indices]
             p0 = [np.median(xdata), 1, 0]
-            popt = fit_sigmoid(xdata, ydata, p0=p0)
-            ax.plot(xdata, sigmoid(xdata, *popt), color=f"C{i}", lw=2)
+            try:
+                popt = fit_sigmoid(xdata, ydata, p0=p0)
+                ax.plot(xdata, sigmoid(xdata, *popt), color=f"C{i}", lw=2)
+            except Exception as e:
+                print(f"\tFailed to fit sigmoid for {metric} - {sorting_case}:\n{e}")
     axes[0].set_ylabel("Value")
     axes[1].set_xlabel("SNR")
     sns.despine(fig_snr)
