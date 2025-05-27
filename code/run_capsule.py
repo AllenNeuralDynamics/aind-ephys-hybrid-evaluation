@@ -99,11 +99,15 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
     levels = ["sorting_case", "stream_name", "case"]
 
     for session_name, session_info_list in data_by_session.items():
+        study_dict[session_name] = {}
         if verbose:
             print(f"Instantiating study for session {session_name}")
         session_study_folder = study_base_folder / session_name
         analyzers_path = {}
         cases = {}
+
+        session_duration = None
+        probe_model_name = None
 
         for session_info in session_info_list:
             gt_sorting = session_info["gt_sorting"]
@@ -120,7 +124,8 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
             analyzer = si.load(analyzer_folder, load_extensions=False)
             (session_study_folder / "sorting_analyzer").mkdir(exist_ok=True, parents=True)
 
-            if not analyzer.has_recording():
+            # we only load the recording once per session to get session duration and probe info
+            if session_duration is None or probe_model_name is None:
                 with open(recording_file, "rb") as f:
                     dump_dict = pickle.load(f)
                     recording_dict = dump_dict["recording_dict"]
@@ -140,10 +145,17 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
                         f = lambda x: x.replace("ecephys_session", raw_folder_name)
                         recording_dict = recursive_path_modifier(recording_dict, f)
                         recording = si.load(recording_dict, base_folder=data_folder)
-                if analyzer is not None:
-                    analyzer._recording = recording
+
+                session_duration = recording.get_total_duration()
+                probes_info = recording.get_annotation("probes_info")
+                if probes_info is not None and len(probes_info) == 1:
+                    probe_model_name = probes_info[0].get("model_name", "unknown")
+                else:
+                    probe_model_name = "unknown"
 
             analyzer_study_folder = session_study_folder / "sorting_analyzer" / case_name
+            # we don't need the recording anymore, let's save some RAM
+            analyzer._recording = None
             analyzer.save_as(format="binary_folder", folder=analyzer_study_folder)
             # we need to add the extensions folder to avoid loading in memory
             shutil.copytree(analyzer.folder / "extensions", analyzer_study_folder / "extensions")
@@ -164,6 +176,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
                     try:
                         sorting = si.load(sorter_folder)
                         case_key = (sorting_case, stream_name, case)
+                        print("\t\t", case_key)
                         cases[case_key] = {
                             "label": f"{sorting_case}_{case_name}",
                             "dataset": case_name,
@@ -202,12 +215,15 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
         (session_study_folder / "info.json").write_text(json.dumps(info, indent=4), encoding="utf8")
 
         # cases is dumped to a pickle file, json is not possible because of the tuple key
+        print(f"\n\nSAVING {len(cases)} cases")
         (session_study_folder / "cases.pickle").write_bytes(pickle.dumps(cases))
 
         if verbose:
             print(f"Creating GT study for session {session_name}")
 
-        study_dict[session_name] = session_study_folder
+        study_dict[session_name]["folder"] = session_study_folder
+        study_dict[session_name]["duration"] = session_duration
+        study_dict[session_name]["probe_model_name"] = probe_model_name
 
     return study_dict, sorting_cases
 
@@ -252,8 +268,12 @@ if __name__ == "__main__":
     # plotting section
     dataframes = {}
 
-    for session_name, session_study_folder in study_dict.items():
+    for session_name, study_dict_session in study_dict.items():
         print(f"\nGenerating results for session {session_name}")
+        session_study_folder = study_dict_session["folder"]
+        session_duration = study_dict_session["duration"]
+        probe_model_name = study_dict_session["probe_model_name"]
+        
         study = SorterStudy(session_study_folder)
 
         print(f"\tPlotting results")
@@ -323,15 +343,6 @@ if __name__ == "__main__":
                     stream_name = stream_name.replace(session_name, "")
                 shutil.copytree(motion_folder, motion_output_folder / stream_name)
 
-        # each dataset has the same duration per session
-        dataset_keys = list(study.datasets.keys())
-        recording, _ = study.datasets[dataset_keys[0]]
-        session_duration = recording.get_total_duration()
-        probes_info = recording.get_annotation("probes_info")
-        if probes_info is not None and len(probes_info) == 1:
-            probe_model_name = probes_info[0].get("model_name", "unknown")
-        else:
-            probe_model_name = "unknown"
         print(f"\tSession duration: {session_duration} - Probe model: {probe_model_name}")
         csvs = [p for p in dataframes_folder.iterdir() if p.suffix == ".csv"]
         for csv_file in csvs:
