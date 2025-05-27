@@ -207,8 +207,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
         if verbose:
             print(f"Creating GT study for session {session_name}")
 
-        study = SorterStudy(session_study_folder)
-        study_dict[session_name] = study
+        study_dict[session_name] = session_study_folder
 
     return study_dict, sorting_cases
 
@@ -253,8 +252,9 @@ if __name__ == "__main__":
     # plotting section
     dataframes = {}
 
-    for session_name, study in study_dict.items():
+    for session_name, session_study_folder in study_dict.items():
         print(f"\nGenerating results for session {session_name}")
+        study = SorterStudy(session_study_folder)
 
         print(f"\tPlotting results")
         # motion
