@@ -600,7 +600,8 @@ if __name__ == "__main__":
         fig.savefig(figures_folder / f"{metric_res_name}_hist.png", transparent=True, dpi=300)
         # for plot clarity, we remove outliers
         df_metric = df.copy()
-        df_metric = df_metric[(np.abs(stats.zscore(df_metric[metric_res_name])) < 3)]
+        if np.std(df_metric[metric_res_name]) != 0:
+            df_metric = df_metric[(np.abs(stats.zscore(df_metric[metric_res_name])) < 3)]
         pivot_dfs[metric_res_name] = df_metric.pivot(index='unit_key', columns='sorting_case', values=metric_res_name)
 
     # pairwise metric scatter
