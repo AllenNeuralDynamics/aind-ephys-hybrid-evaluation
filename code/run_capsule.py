@@ -3,7 +3,7 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-import argparse
+import os
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -333,7 +333,10 @@ def compute_additional_metrics(study, metric_names):
 
 
 if __name__ == "__main__":
-    si.set_global_job_kwargs(n_jobs=-1, progress_bar=False)
+    # Use CO_CPUS/SLURM_JOB_CPUS_PER_NODE env variable if available
+    N_JOBS_EXT = os.getenv("CO_CPUS") or os.getenv("SLURM_JOB_CPUS_PER_NODE")
+    N_JOBS = int(N_JOBS_EXT) if N_JOBS_EXT is not None else -1
+    si.set_global_job_kwargs(dict(n_jobs=N_JOBS))
 
     # find hybrid folder
     hybrid_folder = None
