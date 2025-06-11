@@ -493,7 +493,7 @@ if __name__ == "__main__":
     figures_folder = aggregated_results_folder / "figures"
     figures_folder.mkdir(parents=True)
 
-    fig_perf, axes = plt.subplots(ncols=len(performance_metrics), figsize=(10,5), sharey=True)
+    fig_perf, axes = plt.subplots(ncols=len(performance_metrics), figsize=(12,5), sharey=True)
     num_hybrid_units = int(len(df_units) / len(sorting_cases))
 
     for i, metric in enumerate(performance_metrics):
