@@ -166,7 +166,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
                 session_recording = recording._kwargs["parent_recording"]
                 session_duration = recording.get_total_duration()
                 probes_info = recording.get_annotation("probes_info")
-                if probes_info is not None and len(probes_info) == 1:
+                if probes_info is not None and len(probes_info) > 0:
                     probe_model_name = probes_info[0].get("model_name", "unknown")
                 else:
                     probe_model_name = "unknown"
