@@ -367,6 +367,7 @@ if __name__ == "__main__":
     study_folder = results_folder / "gt_studies"
     study_dict, sorting_cases = create_study_folders(hybrid_folder, study_folder, debug_cases=DEBUG_CASES)
     session_names = list(study_dict.keys())
+    sorting_cases = sorted(sorting_cases)
 
     colors = {}
     for i, sorting_case in enumerate(sorting_cases):
