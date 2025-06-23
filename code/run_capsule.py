@@ -262,7 +262,9 @@ def compute_additional_metrics(study, metric_names):
             matches_by_case_key = {}
             for i, sorting_case in enumerate(sorting_cases):
                 case_key = (str(sorting_case), str(stream), str(case))
-
+                # skip case keys not in benchmarks
+                if case_key not in study.benchmarks:
+                    continue
                 gt = study.benchmarks[case_key].result["gt_comparison"]
                 gt_sorting = gt.sorting1
                 fs = gt_sorting.sampling_frequency
@@ -280,6 +282,8 @@ def compute_additional_metrics(study, metric_names):
                     duration = (gt_sorting.to_spike_vector()[-1]["sample_index"] + 1) / fs
 
             for case_key, matches_gt_unit_ids in matches_by_case_key.items():
+                if case_key not in study.benchmarks:
+                    continue
                 gt = study.benchmarks[case_key].result["gt_comparison"]
                 matches = gt.hungarian_match_12
 
