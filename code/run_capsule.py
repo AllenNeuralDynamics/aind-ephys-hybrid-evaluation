@@ -502,11 +502,20 @@ if __name__ == "__main__":
     figures_folder.mkdir(parents=True)
 
     fig_perf, axes = plt.subplots(ncols=len(performance_metrics), figsize=(12,5), sharey=True)
-    num_hybrid_units = int(len(df_units) / len(sorting_cases))
+    num_hybrid_units = np.max(df_units.groupby("sorting_case")["sorting_case"].count())
 
     for i, metric in enumerate(performance_metrics):
+        # take care of uneven numbers of sorting case units
         df_units_sorted = df_units.sort_values(["sorting_case", metric], ascending=False)
-        df_units_sorted.loc[:, "unit_index"] = np.arange(len(df_units_sorted)) % num_hybrid_units
+        unit_indices = np.zeros(len(df_units_sorted), dtype=int)
+        sorters, counts = np.unique(df_units_sorted.sorting_case, return_counts=True)
+        df_units_sorted.loc[:, "unit_index"] = unit_indices
+        for sorting_case in sorting_cases:
+            df_units_sorted_sorting_case = df_units_sorted.query(f"sorting_case == '{sorting_case}'")
+            df_units_sorted.loc[df_units_sorted_sorting_case.index, "unit_index"] = np.arange(
+                len(df_units_sorted_sorting_case),
+                dtype=int
+            )
         ax = axes[i]
         sns.lineplot(data=df_units_sorted, x="unit_index", y=metric, hue="sorting_case", ax=ax, palette=colors, lw=2.5)
         ax.set_title(metric.capitalize())
