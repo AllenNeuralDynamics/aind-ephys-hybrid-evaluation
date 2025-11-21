@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-set -e
-
-# fixes duration of hybrid sortings
-git clone https://github.com/alejoe91/spikeinterface.git
-cd spikeinterface
-git checkout b130e350d4c16bf0c85ae2c5539484cdc3701801
-pip install .
-cd ..
