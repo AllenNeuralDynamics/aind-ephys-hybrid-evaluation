@@ -399,22 +399,22 @@ if __name__ == "__main__":
 
         study.set_colors(colors, levels_to_group_by=levels)
 
-        fig_perf = plot_performances_ordered(study, levels_to_keep=levels, orientation="horizontal", figsize=FIGSIZE)
+        fig_perf = plot_performances_ordered(study, levels_to_group_by=levels, orientation="horizontal", figsize=FIGSIZE)
         fig_perf.savefig(benchmark_folder / "performances_ordered.pdf")
 
-        fig_count = plot_unit_counts(study, levels_to_keep=levels, figsize=FIGSIZE)
+        fig_count = plot_unit_counts(study, levels_to_group_by=levels, figsize=FIGSIZE)
         fig_count.savefig(benchmark_folder / "unit_counts.pdf")
 
-        fig_run_times = plot_run_times(study, levels_to_keep=levels, figsize=FIGSIZE)
+        fig_run_times = plot_run_times(study, levels_to_group_by=levels, figsize=FIGSIZE)
         fig_run_times.savefig(benchmark_folder / "run_times.pdf")
 
         if len(sorting_cases) > 1:
-            fig_comparison = plot_performances_comparison(study, levels_to_keep=levels, figsize=FIGSIZE)
+            fig_comparison = plot_performances_comparison(study, levels_to_group_by=levels, figsize=FIGSIZE)
             fig_comparison.savefig(benchmark_folder / "comparison.pdf")
 
         study.compute_metrics(metric_names=["snr"])        
         
-        fig_snr = plot_performances_vs_snr(study, levels_to_keep=levels, orientation="horizontal", figsize=FIGSIZE)   
+        fig_snr = plot_performances_vs_snr(study, levels_to_group_by=levels, orientation="horizontal", figsize=FIGSIZE)   
         fig_snr.savefig(benchmark_folder / "performance_snr.pdf")
         skip_metrics = False
 
