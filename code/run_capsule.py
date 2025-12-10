@@ -32,6 +32,7 @@ import seaborn as sns
 from scipy import stats
 
 data_folder = Path("../data")
+scratch_folder = Path("../scratch")
 results_folder = Path("../results")
 
 FIGSIZE = (12, 7)
@@ -43,6 +44,33 @@ submetrics_to_plot = {
     "isi_violation": "isi_violations_ratio",
     "rp_violation": "rp_contamination"
 }
+
+def load_recording_with_remap(recording_file, base_folder):
+    """
+    Load recording with path remapping for back-compatibility.
+    """
+    if recording_file.suffix == ".json":
+        with open(recording_file, "r") as f:
+            dump_dict = json.load(f)
+    elif recording_file.suffix == ".pkl":
+        with open(recording_file, "rb") as f:
+            dump_dict = pickle.load(f)
+    recording_dict = dump_dict["recording_dict"]
+    try:
+        recording = si.load(recording_dict, base_folder=base_folder)
+    except Exception as e:
+        print(f"Couldn't load recording. Trying remapping:\n{e}")
+        from spikeinterface.core.core_tools import SIJsonEncoder, recursive_path_modifier
+        raw_folder_names = [
+            p.name for p in base_folder.iterdir()
+            if "ecephys" in p.name or "behavior" in p.name
+        ]
+        assert len(raw_folder_names) == 1
+        raw_folder_name = raw_folder_names[0]
+        f = lambda x: x.replace("ecephys_session", raw_folder_name)
+        recording_dict = recursive_path_modifier(recording_dict, f)
+        recording = si.load(recording_dict, base_folder=base_folder)
+    return recording
 
 
 def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_cases=None):
@@ -80,7 +108,12 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
         # remove "gt_" from name
         full_case_name = gt_sorting_path.name
         case_name = full_case_name[3:]
-        case_name = case_name[:case_name.find(".pkl")]
+        if ".pkl" in case_name:
+            case_name = case_name[:case_name.find(".pkl")]
+            recording_format = "pkl"
+        elif "json" in case_name:
+            case_name = case_name[:case_name.find(".json")]
+            recording_format = "json"
         full_case_name = case_name
 
         try:
@@ -128,42 +161,44 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
             case_name = session_info["case_name"]
             case_name_with_session = session_info["case_name_with_session"]
             analyzer_folder = hybrid_folder / f"analyzer_{case_name_with_session}"
-            recording_file = hybrid_folder / f"job_{case_name_with_session}.pkl"
+            if (hybrid_folder / f"job_{case_name_with_session}.pkl").is_file():
+                recording_file = hybrid_folder / f"job_{case_name_with_session}.pkl"
+            elif (hybrid_folder / f"job_{case_name_with_session}.json").is_file():
+                recording_file = hybrid_folder / f"job_{case_name_with_session}.json"
 
             case_name_split = case_name.split("_")
             stream_name = "_".join(case_name_split[:-1])
             case = case_name.split("_")[-1]
 
-            if verbose:
-                print(f"\tLoading analyzer for {case_name}")
-            analyzer = si.load(analyzer_folder, load_extensions=False)
+            if analyzer_folder.is_dir():
+                if verbose:
+                    print(f"\tLoading analyzer for {case_name}")
+                analyzer = si.load(analyzer_folder, load_extensions=False)
+            else:
+                if verbose:
+                    print(f"\tNo analyzer found for {case_name}, recomputing...")
+                recording = load_recording_with_remap(recording_file, base_folder=data_folder)
+                analyzer = si.create_sorting_analyzer(
+                    gt_sorting,
+                    recording,
+                    format="binary_folder",
+                    folder=scratch_folder / f"analyzer_{case_name}",
+                    overwrite=True
+                )
+                # needed for SNR
+                analyzer.compute(["noise_levels", "random_spikes", "templates"])
+                analyzer = si.load(scratch_folder / f"analyzer_{case_name}", load_extensions=False)
             (session_study_folder / "sorting_analyzer").mkdir(exist_ok=True, parents=True)
 
             # we only load the recording once per session to get session duration and probe info
             if session_duration is None or probe_model_name is None:
-                with open(recording_file, "rb") as f:
-                    dump_dict = pickle.load(f)
-                    recording_dict = dump_dict["recording_dict"]
-                    if verbose:
-                        print(f"\t\tLoading hybrid recording")
-                    try:
-                        recording = si.load(recording_dict, base_folder=data_folder)
-                    except Exception as e:
-                        if verbose:
-                            print(f"Analyzer couldn't load recording. Trying remapping:\n{e}")
-                        from spikeinterface.core.core_tools import SIJsonEncoder, recursive_path_modifier
-                        raw_folder_names = [
-                            p.name for p in data_folder.iterdir() 
-                            if "ecephys" in p.name or "behavior" in p.name
-                        ]
-                        assert len(raw_folder_names) == 1
-                        raw_folder_name = raw_folder_names[0]
-                        f = lambda x: x.replace("ecephys_session", raw_folder_name)
-                        recording_dict = recursive_path_modifier(recording_dict, f)
-                        recording = si.load(recording_dict, base_folder=data_folder)
+                recording = load_recording_with_remap(recording_file, base_folder=data_folder)
 
                 # we take here the parent recording, before hybrid injection
-                session_recording = recording._kwargs["parent_recording"]
+                if recording.get_parent() is not None:
+                    session_recording = recording.get_parent()
+                else:
+                    session_recording = recording
                 session_duration = recording.get_total_duration()
                 probes_info = recording.get_annotation("probes_info")
                 if probes_info is not None and len(probes_info) > 0:
@@ -173,7 +208,8 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
 
             analyzer_study_folder = session_study_folder / "sorting_analyzer" / case_name
             # we don't need the recording anymore, let's save some RAM
-            analyzer._recording = session_recording
+            if not analyzer.has_recording():
+                analyzer._recording = session_recording
             analyzer.save_as(format="binary_folder", folder=analyzer_study_folder)
             # we need to add the extensions folder to avoid loading in memory
             shutil.copytree(analyzer.folder / "extensions", analyzer_study_folder / "extensions")
@@ -233,7 +269,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
 
         # cases is dumped to a pickle file, json is not possible because of the tuple key
         if verbose:
-            print(f"\nFound {len(cases)} cases for session {session_name}")
+            print(f"Found {len(cases)} cases for session {session_name}")
         (session_study_folder / "cases.pickle").write_bytes(pickle.dumps(cases))
 
         study_dict[session_name]["folder"] = session_study_folder
@@ -251,7 +287,7 @@ def compute_additional_metrics(study, metric_names):
 
     all_units_metrics = None
     matched_unit_metrics = None
-    
+
     sorting_cases = list(np.unique([s[0] for s in study.cases]))
     streams = list(np.unique([s[1] for s in study.cases]))
     cases = list(np.unique([s[2] for s in study.cases]))
@@ -307,7 +343,7 @@ def compute_additional_metrics(study, metric_names):
                     metrics.loc[:, "sorted_unit_id"] = matched_sorted_units
 
                     # compute metrics
-                    for metric_name in metrics_to_compute:
+                    for metric_name in metric_names:
                         res = _misc_metric_name_to_func[metric_name](analyzer_all)
                         if isinstance(res, dict):
                             metrics.loc[:, metric_name] = pd.Series(res)
@@ -414,7 +450,14 @@ if __name__ == "__main__":
 
         study.compute_metrics(metric_names=["snr"])        
         
-        fig_snr = plot_performances_vs_snr(study, levels_to_group_by=levels, orientation="horizontal", figsize=FIGSIZE)   
+        fig_snr = plot_performances_vs_snr(
+            study,
+            levels_to_group_by=levels,
+            with_sigmoid_fit=False,
+            show_average_by_bin=True,
+            orientation="horizontal",
+            figsize=FIGSIZE
+        )
         fig_snr.savefig(benchmark_folder / "performance_snr.pdf")
         skip_metrics = False
 
@@ -439,8 +482,10 @@ if __name__ == "__main__":
         print(f"\tComputing additional metrics")
         metrics_sorted, metrics_matched = compute_additional_metrics(study, metrics_to_compute)
         metrics.to_csv(dataframes_folder / "metrics_gt.csv")
-        metrics_sorted.to_csv(dataframes_folder / "metrics_sorted.csv")
-        metrics_matched.to_csv(dataframes_folder / "metrics_matched.csv")
+        if metrics_sorted is not None:
+            metrics_sorted.to_csv(dataframes_folder / "metrics_sorted.csv")
+        if metrics_matched is not None:
+            metrics_matched.to_csv(dataframes_folder / "metrics_matched.csv")
     
         print("\tCopying motion folders and figures")
         for fig_file in fig_files:
@@ -489,8 +534,8 @@ if __name__ == "__main__":
     df_units = pd.merge(dataframes["performances"], dataframes["metrics_gt"])
     df_counts = dataframes["unit_counts"]
     df_run_times = dataframes["run_times"]
-    df_metrics_sorted = dataframes["metrics_sorted"]
-    df_metrics_matched = dataframes["metrics_matched"]
+    df_metrics_sorted = dataframes.get("metrics_sorted")
+    df_metrics_matched = dataframes.get("metrics_matched")
 
     dataframes_folder = aggregated_results_folder / "dataframes"
     dataframes_folder.mkdir(parents=True)
@@ -602,24 +647,25 @@ if __name__ == "__main__":
     fig_amp.suptitle(f"Performance VS Amplitude(# Units: {num_hybrid_units})")
     fig_amp.savefig(figures_folder / f"performance_vs_amplitude.pdf")
 
-    # other metrics
-    pivot_dfs = {}
-    df = df_metrics_matched
-    df['unit_key'] = df['gt_unit_id'].astype(str) + '|' + df['stream_name'] + '|' + df['case'].astype(str) + '|' + df['session'].astype(str)
 
-    for metric_name in metrics_to_compute:
-        fig, ax = plt.subplots()
-        metric_res_name = submetrics_to_plot.get(metric_name, metric_name)
-        sns.histplot(data=df_metrics_sorted, x=metric_res_name, hue="sorting_case", stat="probability", palette=colors, ax=ax)
-        sns.despine(fig)
-        metric_title = metric_res_name.replace("_", " ").capitalize()
-        ax.set_xlabel(metric_title)
-        fig.savefig(figures_folder / f"{metric_res_name}_hist.png", transparent=True, dpi=300)
-        # for plot clarity, we remove outliers
-        df_metric = df.copy()
-        if np.std(df_metric[metric_res_name]) != 0:
-            df_metric = df_metric[(np.abs(stats.zscore(df_metric[metric_res_name])) < 3)]
-        pivot_dfs[metric_res_name] = df_metric.pivot(index='unit_key', columns='sorting_case', values=metric_res_name)
+    if df_metrics_sorted is not None and df_metrics_matched is not None:
+         # other metrics
+        pivot_dfs = {}
+        df = df_metrics_matched
+        df['unit_key'] = df['gt_unit_id'].astype(str) + '|' + df['stream_name'] + '|' + df['case'].astype(str) + '|' + df['session'].astype(str)
+        for metric_name in metrics_to_compute:
+            fig, ax = plt.subplots()
+            metric_res_name = submetrics_to_plot.get(metric_name, metric_name)
+            sns.histplot(data=df_metrics_sorted, x=metric_res_name, hue="sorting_case", stat="probability", palette=colors, ax=ax)
+            sns.despine(fig)
+            metric_title = metric_res_name.replace("_", " ").capitalize()
+            ax.set_xlabel(metric_title)
+            fig.savefig(figures_folder / f"{metric_res_name}_hist.png", transparent=True, dpi=300)
+            # for plot clarity, we remove outliers
+            df_metric = df.copy()
+            if np.std(df_metric[metric_res_name]) != 0:
+                df_metric = df_metric[(np.abs(stats.zscore(df_metric[metric_res_name])) < 3)]
+            pivot_dfs[metric_res_name] = df_metric.pivot(index='unit_key', columns='sorting_case', values=metric_res_name)
 
     # pairwise metric scatter
     if len(sorting_cases) > 1:
