@@ -193,8 +193,8 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
                 recording = load_recording_with_remap(recording_file, base_folder=data_folder)
 
                 # we take here the parent recording, before hybrid injection
-                if recording.get_parent_recording() is not None:
-                    session_recording = recording.get_parent_recording()
+                if recording.get_parent() is not None:
+                    session_recording = recording.get_parent()
                 else:
                     session_recording = recording
                 session_duration = recording.get_total_duration()
