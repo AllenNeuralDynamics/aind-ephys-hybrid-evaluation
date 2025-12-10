@@ -186,6 +186,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
                 )
                 # needed for SNR
                 analyzer.compute(["noise_levels", "random_spikes", "templates"])
+                analyzer = si.load(scratch_folder / f"analyzer_{case_name}", load_extensions=False)
             (session_study_folder / "sorting_analyzer").mkdir(exist_ok=True, parents=True)
 
             # we only load the recording once per session to get session duration and probe info
@@ -206,7 +207,8 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
 
             analyzer_study_folder = session_study_folder / "sorting_analyzer" / case_name
             # we don't need the recording anymore, let's save some RAM
-            analyzer._recording = session_recording
+            if not analyzer.has_recording():
+                analyzer._recording = session_recording
             analyzer.save_as(format="binary_folder", folder=analyzer_study_folder)
             # we need to add the extensions folder to avoid loading in memory
             shutil.copytree(analyzer.folder / "extensions", analyzer_study_folder / "extensions")
