@@ -32,6 +32,7 @@ import seaborn as sns
 from scipy import stats
 
 data_folder = Path("../data")
+scratch_folder = Path("../scratch")
 results_folder = Path("../results")
 
 FIGSIZE = (12, 7)
@@ -43,6 +44,33 @@ submetrics_to_plot = {
     "isi_violation": "isi_violations_ratio",
     "rp_violation": "rp_contamination"
 }
+
+def load_recording_with_remap(recording_file, base_folder):
+    """
+    Load recording with path remapping for back-compatibility.
+    """
+    if recording_file.suffix == ".json":
+        with open(recording_file, "r") as f:
+            dump_dict = json.load(f)
+    elif recording_file.suffix == ".pkl":
+        with open(recording_file, "rb") as f:
+            dump_dict = pickle.load(f)
+    recording_dict = dump_dict["recording_dict"]
+    try:
+        recording = si.load(recording_dict, base_folder=base_folder)
+    except Exception as e:
+        print(f"Couldn't load recording. Trying remapping:\n{e}")
+        from spikeinterface.core.core_tools import SIJsonEncoder, recursive_path_modifier
+        raw_folder_names = [
+            p.name for p in base_folder.iterdir()
+            if "ecephys" in p.name or "behavior" in p.name
+        ]
+        assert len(raw_folder_names) == 1
+        raw_folder_name = raw_folder_names[0]
+        f = lambda x: x.replace("ecephys_session", raw_folder_name)
+        recording_dict = recursive_path_modifier(recording_dict, f)
+        recording = si.load(recording_dict, base_folder=base_folder)
+    return recording
 
 
 def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_cases=None):
@@ -80,7 +108,12 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
         # remove "gt_" from name
         full_case_name = gt_sorting_path.name
         case_name = full_case_name[3:]
-        case_name = case_name[:case_name.find(".pkl")]
+        if ".pkl" in case_name:
+            case_name = case_name[:case_name.find(".pkl")]
+            recording_format = "pkl"
+        elif "json" in case_name:
+            case_name = case_name[:case_name.find(".json")]
+            recording_format = "json"
         full_case_name = case_name
 
         try:
@@ -128,42 +161,42 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
             case_name = session_info["case_name"]
             case_name_with_session = session_info["case_name_with_session"]
             analyzer_folder = hybrid_folder / f"analyzer_{case_name_with_session}"
-            recording_file = hybrid_folder / f"job_{case_name_with_session}.pkl"
+            if (hybrid_folder / f"job_{case_name_with_session}.pkl").is_file():
+                recording_file = hybrid_folder / f"job_{case_name_with_session}.pkl"
+            elif (hybrid_folder / f"job_{case_name_with_session}.json").is_file():
+                recording_file = hybrid_folder / f"job_{case_name_with_session}.json"
 
             case_name_split = case_name.split("_")
             stream_name = "_".join(case_name_split[:-1])
             case = case_name.split("_")[-1]
 
-            if verbose:
-                print(f"\tLoading analyzer for {case_name}")
-            analyzer = si.load(analyzer_folder, load_extensions=False)
+            if analyzer_folder.is_dir():
+                if verbose:
+                    print(f"\tLoading analyzer for {case_name}")
+                analyzer = si.load(analyzer_folder, load_extensions=False)
+            else:
+                if verbose:
+                    print(f"\tNo analyzer found for {case_name}, recomputing...")
+                recording = load_recording_with_remap(recording_file, base_folder=data_folder)
+                analyzer = si.create_sorting_analyzer(
+                    gt_sorting,
+                    recording,
+                    format="binary_folder",
+                    folder=scratch_folder / f"analyzer_{case_name}"
+                )
+                # needed for SNR
+                analyzer.compute(["noise_levels", "random_spikes", "templates"])
             (session_study_folder / "sorting_analyzer").mkdir(exist_ok=True, parents=True)
 
             # we only load the recording once per session to get session duration and probe info
             if session_duration is None or probe_model_name is None:
-                with open(recording_file, "rb") as f:
-                    dump_dict = pickle.load(f)
-                    recording_dict = dump_dict["recording_dict"]
-                    if verbose:
-                        print(f"\t\tLoading hybrid recording")
-                    try:
-                        recording = si.load(recording_dict, base_folder=data_folder)
-                    except Exception as e:
-                        if verbose:
-                            print(f"Analyzer couldn't load recording. Trying remapping:\n{e}")
-                        from spikeinterface.core.core_tools import SIJsonEncoder, recursive_path_modifier
-                        raw_folder_names = [
-                            p.name for p in data_folder.iterdir() 
-                            if "ecephys" in p.name or "behavior" in p.name
-                        ]
-                        assert len(raw_folder_names) == 1
-                        raw_folder_name = raw_folder_names[0]
-                        f = lambda x: x.replace("ecephys_session", raw_folder_name)
-                        recording_dict = recursive_path_modifier(recording_dict, f)
-                        recording = si.load(recording_dict, base_folder=data_folder)
+                recording = load_recording_with_remap(recording_file, base_folder=data_folder)
 
                 # we take here the parent recording, before hybrid injection
-                session_recording = recording._kwargs["parent_recording"]
+                if recording.get_parent_recording() is not None:
+                    session_recording = recording.get_parent_recording()
+                else:
+                    session_recording = recording
                 session_duration = recording.get_total_duration()
                 probes_info = recording.get_annotation("probes_info")
                 if probes_info is not None and len(probes_info) > 0:
@@ -414,7 +447,14 @@ if __name__ == "__main__":
 
         study.compute_metrics(metric_names=["snr"])        
         
-        fig_snr = plot_performances_vs_snr(study, levels_to_group_by=levels, orientation="horizontal", figsize=FIGSIZE)   
+        fig_snr = plot_performances_vs_snr(
+            study,
+            levels_to_group_by=levels,
+            with_sigmoid_fit=False,
+            show_average_by_bin=True,
+            orientation="horizontal",
+            figsize=FIGSIZE
+        )
         fig_snr.savefig(benchmark_folder / "performance_snr.pdf")
         skip_metrics = False
 
