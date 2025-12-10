@@ -182,7 +182,8 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
                     gt_sorting,
                     recording,
                     format="binary_folder",
-                    folder=scratch_folder / f"analyzer_{case_name}"
+                    folder=scratch_folder / f"analyzer_{case_name}",
+                    overwrite=True
                 )
                 # needed for SNR
                 analyzer.compute(["noise_levels", "random_spikes", "templates"])
@@ -268,7 +269,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
 
         # cases is dumped to a pickle file, json is not possible because of the tuple key
         if verbose:
-            print(f"\nFound {len(cases)} cases for session {session_name}")
+            print(f"Found {len(cases)} cases for session {session_name}")
         (session_study_folder / "cases.pickle").write_bytes(pickle.dumps(cases))
 
         study_dict[session_name]["folder"] = session_study_folder
@@ -286,7 +287,7 @@ def compute_additional_metrics(study, metric_names):
 
     all_units_metrics = None
     matched_unit_metrics = None
-    
+
     sorting_cases = list(np.unique([s[0] for s in study.cases]))
     streams = list(np.unique([s[1] for s in study.cases]))
     cases = list(np.unique([s[2] for s in study.cases]))
@@ -342,7 +343,7 @@ def compute_additional_metrics(study, metric_names):
                     metrics.loc[:, "sorted_unit_id"] = matched_sorted_units
 
                     # compute metrics
-                    for metric_name in metrics_to_compute:
+                    for metric_name in metric_names:
                         res = _misc_metric_name_to_func[metric_name](analyzer_all)
                         if isinstance(res, dict):
                             metrics.loc[:, metric_name] = pd.Series(res)
@@ -481,8 +482,10 @@ if __name__ == "__main__":
         print(f"\tComputing additional metrics")
         metrics_sorted, metrics_matched = compute_additional_metrics(study, metrics_to_compute)
         metrics.to_csv(dataframes_folder / "metrics_gt.csv")
-        metrics_sorted.to_csv(dataframes_folder / "metrics_sorted.csv")
-        metrics_matched.to_csv(dataframes_folder / "metrics_matched.csv")
+        if metrics_sorted is not None:
+            metrics_sorted.to_csv(dataframes_folder / "metrics_sorted.csv")
+        if metrics_matched is not None:
+            metrics_matched.to_csv(dataframes_folder / "metrics_matched.csv")
     
         print("\tCopying motion folders and figures")
         for fig_file in fig_files:
@@ -531,8 +534,8 @@ if __name__ == "__main__":
     df_units = pd.merge(dataframes["performances"], dataframes["metrics_gt"])
     df_counts = dataframes["unit_counts"]
     df_run_times = dataframes["run_times"]
-    df_metrics_sorted = dataframes["metrics_sorted"]
-    df_metrics_matched = dataframes["metrics_matched"]
+    df_metrics_sorted = dataframes.get("metrics_sorted")
+    df_metrics_matched = dataframes.get("metrics_matched")
 
     dataframes_folder = aggregated_results_folder / "dataframes"
     dataframes_folder.mkdir(parents=True)
@@ -644,24 +647,25 @@ if __name__ == "__main__":
     fig_amp.suptitle(f"Performance VS Amplitude(# Units: {num_hybrid_units})")
     fig_amp.savefig(figures_folder / f"performance_vs_amplitude.pdf")
 
-    # other metrics
-    pivot_dfs = {}
-    df = df_metrics_matched
-    df['unit_key'] = df['gt_unit_id'].astype(str) + '|' + df['stream_name'] + '|' + df['case'].astype(str) + '|' + df['session'].astype(str)
 
-    for metric_name in metrics_to_compute:
-        fig, ax = plt.subplots()
-        metric_res_name = submetrics_to_plot.get(metric_name, metric_name)
-        sns.histplot(data=df_metrics_sorted, x=metric_res_name, hue="sorting_case", stat="probability", palette=colors, ax=ax)
-        sns.despine(fig)
-        metric_title = metric_res_name.replace("_", " ").capitalize()
-        ax.set_xlabel(metric_title)
-        fig.savefig(figures_folder / f"{metric_res_name}_hist.png", transparent=True, dpi=300)
-        # for plot clarity, we remove outliers
-        df_metric = df.copy()
-        if np.std(df_metric[metric_res_name]) != 0:
-            df_metric = df_metric[(np.abs(stats.zscore(df_metric[metric_res_name])) < 3)]
-        pivot_dfs[metric_res_name] = df_metric.pivot(index='unit_key', columns='sorting_case', values=metric_res_name)
+    if df_metrics_sorted is not None and df_metrics_matched is not None:
+         # other metrics
+        pivot_dfs = {}
+        df = df_metrics_matched
+        df['unit_key'] = df['gt_unit_id'].astype(str) + '|' + df['stream_name'] + '|' + df['case'].astype(str) + '|' + df['session'].astype(str)
+        for metric_name in metrics_to_compute:
+            fig, ax = plt.subplots()
+            metric_res_name = submetrics_to_plot.get(metric_name, metric_name)
+            sns.histplot(data=df_metrics_sorted, x=metric_res_name, hue="sorting_case", stat="probability", palette=colors, ax=ax)
+            sns.despine(fig)
+            metric_title = metric_res_name.replace("_", " ").capitalize()
+            ax.set_xlabel(metric_title)
+            fig.savefig(figures_folder / f"{metric_res_name}_hist.png", transparent=True, dpi=300)
+            # for plot clarity, we remove outliers
+            df_metric = df.copy()
+            if np.std(df_metric[metric_res_name]) != 0:
+                df_metric = df_metric[(np.abs(stats.zscore(df_metric[metric_res_name])) < 3)]
+            pivot_dfs[metric_res_name] = df_metric.pivot(index='unit_key', columns='sorting_case', values=metric_res_name)
 
     # pairwise metric scatter
     if len(sorting_cases) > 1:
