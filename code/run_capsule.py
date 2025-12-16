@@ -648,9 +648,9 @@ if __name__ == "__main__":
     fig_amp.savefig(figures_folder / f"performance_vs_amplitude.pdf")
 
 
+    pivot_dfs = {}
     if df_metrics_sorted is not None and df_metrics_matched is not None:
          # other metrics
-        pivot_dfs = {}
         df = df_metrics_matched
         df['unit_key'] = df['gt_unit_id'].astype(str) + '|' + df['stream_name'] + '|' + df['case'].astype(str) + '|' + df['session'].astype(str)
         for metric_name in metrics_to_compute:
