@@ -294,7 +294,7 @@ def compute_additional_metrics(study, metric_names):
     """
     Compute additional metrics on sorted units.
     """
-    from spikeinterface.qualitymetrics.quality_metric_list import _misc_metric_name_to_func, qm_compute_name_to_column_names
+    from spikeinterface.metrics.quality import ComputeQualityMetrics
 
     all_units_metrics = None
     matched_unit_metrics = None
@@ -347,6 +347,7 @@ def compute_additional_metrics(study, metric_names):
                 if len(matched_sorted_units) > 0:
                     analyzer_all = fake_analyzer.select_units(matched_sorted_units)
 
+                    # TODO: refactor this with v0.104.2
                     metrics = pd.DataFrame(index=analyzer_all.unit_ids)
                     for i, level in enumerate(study.levels):
                         metrics.loc[:, level] = case_key[i]
@@ -355,7 +356,9 @@ def compute_additional_metrics(study, metric_names):
 
                     # compute metrics
                     for metric_name in metric_names:
-                        res = _misc_metric_name_to_func[metric_name](analyzer_all)
+                        m = ComputeQualityMetrics.get_metric_by_name(metric_name)
+                        default_params = m.metric_params
+                        res = m.compute(analyzer_all, analyzer_all.unit_ids, default_params, {}, {})
                         if isinstance(res, dict):
                             metrics.loc[:, metric_name] = pd.Series(res)
                         else:
