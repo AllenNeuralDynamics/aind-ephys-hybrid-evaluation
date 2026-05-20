@@ -1,4 +1,4 @@
-# hash:sha256:be46bd0158878999eda379909481a2967442d85f39dec75cadd75906adff670d
+# hash:sha256:8e3e4633ed4747822d39a5e988b793ad99a592c220a0891424cb54f7ae981cce
 ARG REGISTRY_HOST
 FROM $REGISTRY_HOST/codeocean/mambaforge3:24.5.0-0-python3.12.4-ubuntu22.04
 
@@ -14,5 +14,5 @@ RUN apt-get update \
 RUN pip install -U --no-cache-dir \
     s3fs==2026.4.0 \
     seaborn==0.13.2 \
-    spikeinterface[full,widgets]==0.103.2 \
+    spikeinterface[full,widgets]==0.104.2 \
     wavpack-numcodecs==0.2.2
