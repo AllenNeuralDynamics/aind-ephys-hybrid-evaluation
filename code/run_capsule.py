@@ -376,7 +376,7 @@ if __name__ == "__main__":
     # Use CO_CPUS/N_JOBS_EXT env variable if available
     N_JOBS_EXT = os.getenv("CO_CPUS") or os.getenv("N_JOBS_EXT")
     N_JOBS = int(N_JOBS_EXT) if N_JOBS_EXT is not None else -1
-    si.set_global_job_kwargs(n_jobs=N_JOBS, progress_bar=False)
+    si.set_global_job_kwargs(n_jobs=N_JOBS, progress_bar=False, mp_context="spawn")
 
     # find hybrid folder
     hybrid_folder = None
