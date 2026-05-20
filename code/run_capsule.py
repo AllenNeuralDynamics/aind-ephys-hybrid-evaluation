@@ -227,38 +227,41 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
                         log = json.load(f)
                         sorter_name = log["sorter_name"]
                         run_time = log["run_time"]
+                else:
+                    sorter_name = sorting_case
+                    run_time = -1
 
-                    # only add case if sorting output is complete
-                    try:
-                        sorting = si.load(sorter_folder)
-                        case_key = (sorting_case, stream_name, case)
-                        cases[case_key] = {
-                            "label": f"{sorting_case}_{case_name}",
-                            "dataset": case_name,
-                            "params": {
-                                "sorter_name": sorter_name,
-                            }
+                # only add case if sorting output is complete
+                try:
+                    sorting = si.load(sorter_folder)
+                    case_key = (sorting_case, stream_name, case)
+                    cases[case_key] = {
+                        "label": f"{sorting_case}_{case_name}",
+                        "dataset": case_name,
+                        "params": {
+                            "sorter_name": sorter_name,
                         }
-                        # copy result
-                        (session_study_folder / "results").mkdir(exist_ok=True, parents=True)
-                        case_path_name = _key_separator.join([str(k) for k in case_key])
-                        result_folder = session_study_folder / "results" / case_path_name
-                        sorting.save(folder=result_folder / "sorting")
-                        # dump run time
-                        with open(result_folder / "run_time.pickle", mode="wb") as f:
-                            pickle.dump(run_time, f)
-                        sortings[case_key] = sorting
-                        # perform gt comparison and dump
-                        cmp = sc.compare_sorter_to_ground_truth(
-                            gt_sorting, 
-                            sorting, 
-                            exhaustive_gt=False,
-                            match_score=0.2 # all matches below this are set to 0
-                        )
-                        with open(result_folder / "gt_comparison.pickle", mode="wb") as f:
-                            pickle.dump(cmp, f)
-                    except Exception as e:
-                        print(f"\t\tFailed to load sorting case {sorting_case}:\n\n{e}")
+                    }
+                    # copy result
+                    (session_study_folder / "results").mkdir(exist_ok=True, parents=True)
+                    case_path_name = _key_separator.join([str(k) for k in case_key])
+                    result_folder = session_study_folder / "results" / case_path_name
+                    sorting.save(folder=result_folder / "sorting")
+                    # dump run time
+                    with open(result_folder / "run_time.pickle", mode="wb") as f:
+                        pickle.dump(run_time, f)
+                    sortings[case_key] = sorting
+                    # perform gt comparison and dump
+                    cmp = sc.compare_sorter_to_ground_truth(
+                        gt_sorting, 
+                        sorting, 
+                        exhaustive_gt=False,
+                        match_score=0.2 # all matches below this are set to 0
+                    )
+                    with open(result_folder / "gt_comparison.pickle", mode="wb") as f:
+                        pickle.dump(cmp, f)
+                except Exception as e:
+                    print(f"\t\tFailed to load sorting case {sorting_case}:\n\n{e}")
 
                     
         # study metadata
