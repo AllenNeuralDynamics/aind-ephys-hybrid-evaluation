@@ -384,7 +384,7 @@ if __name__ == "__main__":
     # Use CO_CPUS/N_JOBS_EXT env variable if available
     N_JOBS_EXT = os.getenv("CO_CPUS") or os.getenv("N_JOBS_EXT")
     N_JOBS = int(N_JOBS_EXT) if N_JOBS_EXT is not None else -1
-    si.set_global_job_kwargs(n_jobs=N_JOBS, progress_bar=False)
+    si.set_global_job_kwargs(n_jobs=N_JOBS, progress_bar=False, mp_context="spawn")
 
     # find hybrid folder
     hybrid_folder = None
@@ -698,7 +698,7 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"\tFailed to fit sigmoid for {metric} - {sorting_case}:\n{e}")
     axes[0].set_ylabel("Value")
-    axes[1].set_xlabel("Amplitude ($\mu$V)")
+    axes[1].set_xlabel("Amplitude ($\\mu$V)")
     sns.despine(fig_amp)
 
     fig_amp.suptitle(f"Performance VS Amplitude(# Units: {num_hybrid_units})")
