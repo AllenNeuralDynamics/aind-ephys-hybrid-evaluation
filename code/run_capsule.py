@@ -37,6 +37,8 @@ results_folder = Path("../results")
 
 FIGSIZE = (12, 7)
 DEBUG_CASES = None
+# sessions with fewer sorting cases than this are dropped (comparisons need at least 2)
+MIN_SORTING_CASES_PER_SESSION = 2
 
 
 metrics_to_compute = ["isi_violation", "rp_violation", "presence_ratio"]
@@ -268,13 +270,19 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
         (session_study_folder / "info.json").write_text(json.dumps(info, indent=4), encoding="utf8")
 
         # cases is dumped to a pickle file, json is not possible because of the tuple key
+        # keep track of which sorting cases actually have results for this session
+        session_sorting_cases = sorted(set(str(case_key[0]) for case_key in cases))
         if verbose:
             print(f"Found {len(cases)} cases for session {session_name}")
+            for sorting_case in sorting_cases:
+                num_cases = len([k for k in cases if str(k[0]) == str(sorting_case)])
+                print(f"\t{sorting_case}: {num_cases} cases")
         (session_study_folder / "cases.pickle").write_bytes(pickle.dumps(cases))
 
         study_dict[session_name]["folder"] = session_study_folder
         study_dict[session_name]["duration"] = session_duration
         study_dict[session_name]["probe_model_name"] = probe_model_name
+        study_dict[session_name]["sorting_cases"] = session_sorting_cases
 
     return study_dict, sorting_cases
 
@@ -406,8 +414,56 @@ if __name__ == "__main__":
     # Create study
     study_folder = results_folder / "gt_studies"
     study_dict, sorting_cases = create_study_folders(hybrid_folder, study_folder, debug_cases=DEBUG_CASES)
-    session_names = list(study_dict.keys())
     sorting_cases = sorted(sorting_cases)
+
+    # Drop sessions that don't have enough sorting cases to be compared.
+    # This happens when some upstream sorting jobs failed for a session/recording.
+    min_sorting_cases_per_session = min(len(sorting_cases), MIN_SORTING_CASES_PER_SESSION)
+    dropped_sessions = {}
+    for session_name in list(study_dict.keys()):
+        session_sorting_cases = study_dict[session_name]["sorting_cases"]
+        if len(session_sorting_cases) < min_sorting_cases_per_session:
+            dropped_sessions[session_name] = session_sorting_cases
+            # remove the (unusable) study folder so it doesn't end up in the results
+            session_study_folder = study_dict[session_name]["folder"]
+            if session_study_folder.is_dir():
+                shutil.rmtree(session_study_folder)
+            del study_dict[session_name]
+
+    if len(dropped_sessions) > 0:
+        print("\n" + "!" * 90)
+        print(
+            f"WARNING: dropping {len(dropped_sessions)} / "
+            f"{len(dropped_sessions) + len(study_dict)} sessions with fewer than "
+            f"{min_sorting_cases_per_session} sorting cases (most likely some upstream "
+            "sorting jobs failed):"
+        )
+        for session_name, session_sorting_cases in dropped_sessions.items():
+            missing_sorting_cases = [sc for sc in sorting_cases if sc not in session_sorting_cases]
+            found_str = ", ".join(session_sorting_cases) if len(session_sorting_cases) > 0 else "none"
+            missing_str = ", ".join(missing_sorting_cases) if len(missing_sorting_cases) > 0 else "none"
+            print(f"\t- {session_name}: found [{found_str}] - missing [{missing_str}]")
+        print("These sessions are excluded from all per-session and aggregated results.")
+        print("!" * 90 + "\n")
+
+    assert len(study_dict) > 0, (
+        f"No session has at least {min_sorting_cases_per_session} sorting cases: "
+        "nothing to evaluate. Check the upstream sorting jobs."
+    )
+
+    # only keep sorting cases that are present in at least one retained session
+    sorting_cases_retained = sorted(
+        set(sc for d in study_dict.values() for sc in d["sorting_cases"])
+    )
+    if sorting_cases_retained != sorting_cases:
+        dropped_sorting_cases = [sc for sc in sorting_cases if sc not in sorting_cases_retained]
+        print(
+            f"WARNING: dropping sorting case(s) [{', '.join(dropped_sorting_cases)}]: "
+            "no retained session has results for them\n"
+        )
+        sorting_cases = sorting_cases_retained
+
+    session_names = list(study_dict.keys())
 
     colors = {}
     for i, sorting_case in enumerate(sorting_cases):
@@ -421,6 +477,7 @@ if __name__ == "__main__":
         session_study_folder = study_dict_session["folder"]
         session_duration = study_dict_session["duration"]
         probe_model_name = study_dict_session["probe_model_name"]
+        session_sorting_cases = study_dict_session["sorting_cases"]
         
         study = SorterStudy(session_study_folder)
 
@@ -444,7 +501,7 @@ if __name__ == "__main__":
         fig_run_times = plot_run_times(study, levels_to_group_by=levels, figsize=FIGSIZE)
         fig_run_times.savefig(benchmark_folder / "run_times.pdf")
 
-        if len(sorting_cases) > 1:
+        if len(session_sorting_cases) > 1:
             fig_comparison = plot_performances_comparison(study, levels_to_group_by=levels, figsize=FIGSIZE)
             fig_comparison.savefig(benchmark_folder / "comparison.pdf")
 
