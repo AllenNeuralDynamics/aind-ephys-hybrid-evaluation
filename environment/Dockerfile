@@ -1,13 +1,23 @@
-# hash:sha256:e75e9c41ec8ef7340c466d592004e691e226cb16be85391574d70f54c524d667
+# hash:sha256:d55af04ded55c9f7981275678a4f24c61bf0b9a91db8d53578886330ce656924
 ARG REGISTRY_HOST
-FROM $REGISTRY_HOST/codeocean/jupyterlab:3.6.1-miniconda4.12.0-python3.9-ubuntu20.04
+FROM $REGISTRY_HOST/codeocean/mambaforge3:24.5.0-0-python3.12.4-ubuntu22.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG GIT_ASKPASS
-COPY git-askpass /
+COPY git-ask-pass /
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential=12.9ubuntu3 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN conda install -y \
+        jupyterlab==4.5.7 \
+    && conda clean -ya
 
 RUN pip install -U --no-cache-dir \
     log-schema==0.2.10.dev1 \
+    s3fs==2026.4.0 \
     seaborn==0.13.2 \
-    spikeinterface[full,widgets]==0.103.0 \
+    spikeinterface[full,widgets]==0.104.2 \
     wavpack-numcodecs==0.2.2
