@@ -338,7 +338,11 @@ def compute_additional_metrics(study, metric_names):
 
                 sorting = study.benchmarks[case_key].result["sorting"]
                 fake_rec = si.generate_recording(durations=[duration], sampling_frequency=fs, num_channels=2)
-                fake_analyzer = si.create_sorting_analyzer(sorting, fake_rec, sparse=False)
+                # the fake recording only serves spike-train metrics: skip the main channel lookup
+                # (sorter outputs carry a main_channel_id property with the real channel ids)
+                fake_analyzer = si.create_sorting_analyzer(
+                    sorting, fake_rec, sparse=False, main_channel_indices=np.zeros(sorting.get_num_units(), dtype=int)
+                )
 
                 matches_gt_unit_ids = matches.index.values.astype(int)
                 matched_sorted_units = matches.values.astype(int)
@@ -577,7 +581,7 @@ def run() -> None:
         metrics = study.get_all_metrics()
         for case_key in study.cases.keys():
             analyzer = study.get_sorting_analyzer(case_key)
-            template_amps = si.get_template_extremum_amplitude(analyzer, mode="peak_to_peak")
+            template_amps = si.get_template_extremum_amplitude(analyzer, peak_sign=None, peak_mode="peak_to_peak")
             metrics.loc[case_key, "amplitude"] = np.array(list(template_amps.values()))
 
         logging.info(f"\tComputing additional metrics")
@@ -757,6 +761,11 @@ def run() -> None:
         for metric_name in metrics_to_compute:
             fig, ax = plt.subplots()
             metric_res_name = submetrics_to_plot.get(metric_name, metric_name)
+            # e.g. presence_ratio is NaN for recordings shorter than its bin duration
+            if df_metrics_sorted[metric_res_name].isna().all():
+                logging.info(f"\tSkipping {metric_res_name} plots: no values")
+                plt.close(fig)
+                continue
             sns.histplot(data=df_metrics_sorted, x=metric_res_name, hue="sorting_case", stat="probability", palette=colors, ax=ax)
             sns.despine(fig)
             metric_title = metric_res_name.replace("_", " ").capitalize()
