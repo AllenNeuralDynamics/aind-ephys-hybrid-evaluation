@@ -318,8 +318,8 @@ def compute_additional_metrics(study, metric_names):
                 gt_sorting = gt.sorting1
                 fs = gt_sorting.sampling_frequency
                 matches = gt.hungarian_match_12
-                matched_units = matches.astype(int)
-                matched_gt = matches.index.values[matched_units != -1]
+                # unit ids can be int or str (e.g. existing datasets): -1 means unmatched
+                matched_gt = matches.index.values[matches.astype(str).values != "-1"]
                 if i == 0:
                     matched_gt_units_across_sorting_cases = set(matched_gt)
                 else:
@@ -344,11 +344,9 @@ def compute_additional_metrics(study, metric_names):
                     sorting, fake_rec, sparse=False, main_channel_indices=np.zeros(sorting.get_num_units(), dtype=int)
                 )
 
-                matches_gt_unit_ids = matches.index.values.astype(int)
-                matched_sorted_units = matches.values.astype(int)
-                matched_mask = matched_sorted_units != -1
-                matches_gt_unit_ids = matches_gt_unit_ids[matched_mask]
-                matched_sorted_units = matched_sorted_units[matched_mask]
+                matched_mask = matches.astype(str).values != "-1"
+                matches_gt_unit_ids = matches.index.values[matched_mask]
+                matched_sorted_units = matches.values[matched_mask]
 
                 if len(matched_sorted_units) > 0:
                     analyzer_all = fake_analyzer.select_units(matched_sorted_units)
@@ -380,7 +378,7 @@ def compute_additional_metrics(study, metric_names):
                     if len(matches_gt_unit_ids) > 0:
                         # only on units matched across cases
                         matched_on_all_sorting_cases = matches[matches_gt_unit_ids]
-                        matched_on_all_sorting_cases = matched_on_all_sorting_cases.values.astype(int)
+                        matched_on_all_sorting_cases = matched_on_all_sorting_cases.values
 
                         metrics_matched = metrics.loc[matched_on_all_sorting_cases]
                         if matched_unit_metrics is None:
@@ -757,7 +755,8 @@ def run() -> None:
     if df_metrics_sorted is not None and df_metrics_matched is not None:
          # other metrics
         df = df_metrics_matched
-        df['unit_key'] = df['gt_unit_id'].astype(str) + '|' + df['stream_name'] + '|' + df['case'].astype(str) + '|' + df['session'].astype(str)
+        # stream_name is empty (NaN) when case names don't include a stream: keep the key unique
+        df['unit_key'] = df['gt_unit_id'].astype(str) + '|' + df['stream_name'].fillna('').astype(str) + '|' + df['case'].astype(str) + '|' + df['session'].astype(str)
         for metric_name in metrics_to_compute:
             fig, ax = plt.subplots()
             metric_res_name = submetrics_to_plot.get(metric_name, metric_name)
