@@ -16,7 +16,23 @@ These additional folder names will be used as `sorter_name` (e.g., `ks25`, `ks4`
 
 ### Parameters
 
-The `code/run` script takes no parameters.
+The capsule reads its parameters from `../params.json` (it fails if the file is missing), using the `hybrid_evaluation` section:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `debug_cases` | `null` | If set, only the first `debug_cases` hybrid GT datasets (sorted by name) are evaluated |
+
+The number of parallel jobs is set by the `CO_CPUS` or `N_JOBS_EXT` environment variables (default: all CPUs).
+
+Minimal example `params.json`:
+
+```json
+{
+    "hybrid_evaluation": {
+        "debug_cases": null
+    }
+}
+```
 
 ### Output
 

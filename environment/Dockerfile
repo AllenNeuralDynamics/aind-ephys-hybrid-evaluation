@@ -7,6 +7,7 @@ ARG GIT_ASKPASS
 COPY git-askpass /
 
 RUN pip install -U --no-cache-dir \
+    log-schema==0.2.10.dev1 \
     seaborn==0.13.2 \
     spikeinterface[full,widgets]==0.103.0 \
     wavpack-numcodecs==0.2.2

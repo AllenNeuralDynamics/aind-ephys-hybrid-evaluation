@@ -4,6 +4,8 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import os
+import logging
+import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -34,9 +36,9 @@ from scipy import stats
 data_folder = Path("../data")
 scratch_folder = Path("../scratch")
 results_folder = Path("../results")
+PARAMS_FILE = Path("../params.json")
 
 FIGSIZE = (12, 7)
-DEBUG_CASES = None
 
 
 metrics_to_compute = ["isi_violation", "rp_violation", "presence_ratio"]
@@ -59,7 +61,7 @@ def load_recording_with_remap(recording_file, base_folder):
     try:
         recording = si.load(recording_dict, base_folder=base_folder)
     except Exception as e:
-        print(f"Couldn't load recording. Trying remapping:\n{e}")
+        logging.info(f"Couldn't load recording. Trying remapping:\n{e}")
         from spikeinterface.core.core_tools import SIJsonEncoder, recursive_path_modifier
         raw_folder_names = [
             p.name for p in base_folder.iterdir()
@@ -92,13 +94,13 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
         if len(spikesorted_folders) > 0:
             sorting_cases.append(possible_sorter_folder.name)
     if verbose:
-        print(f"Found {len(gt_sorting_paths)} hybrid GT datasets")
-        print(f"Spike sorting cases: {sorting_cases}")
+        logging.info(f"Found {len(gt_sorting_paths)} hybrid GT datasets")
+        logging.info(f"Spike sorting cases: {sorting_cases}")
 
     # create datasets and cases
     if debug_cases is not None:
         if verbose:
-            print(f"Only loading {debug_cases} debug cases")
+            logging.info(f"Only loading {debug_cases} debug cases")
         gt_sorting_paths = sorted(gt_sorting_paths)[:debug_cases]
     else:
         gt_sorting_paths = sorted(gt_sorting_paths)
@@ -138,7 +140,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
         )
         data_by_session[session_name].append(session_info)
     if verbose:
-        print(f"Loaded GT sortings")
+        logging.info(f"Loaded GT sortings")
 
     # create GT studies
     study_dict = {}
@@ -147,7 +149,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
     for session_name, session_info_list in data_by_session.items():
         study_dict[session_name] = {}
         if verbose:
-            print(f"Organizing study folder for session {session_name}")
+            logging.info(f"Organizing study folder for session {session_name}")
         session_study_folder = study_base_folder / session_name
         analyzers_path = {}
         cases = {}
@@ -172,11 +174,11 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
 
             if analyzer_folder.is_dir():
                 if verbose:
-                    print(f"\tLoading analyzer for {case_name}")
+                    logging.info(f"\tLoading analyzer for {case_name}")
                 analyzer = si.load(analyzer_folder, load_extensions=False)
             else:
                 if verbose:
-                    print(f"\tNo analyzer found for {case_name}, recomputing...")
+                    logging.info(f"\tNo analyzer found for {case_name}, recomputing...")
                 recording = load_recording_with_remap(recording_file, base_folder=data_folder)
                 analyzer = si.create_sorting_analyzer(
                     gt_sorting,
@@ -256,7 +258,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
                         with open(result_folder / "gt_comparison.pickle", mode="wb") as f:
                             pickle.dump(cmp, f)
                     except Exception as e:
-                        print(f"\t\tFailed to load sorting case {sorting_case}:\n\n{e}")
+                        logging.info(f"\t\tFailed to load sorting case {sorting_case}:\n\n{e}")
 
                     
         # study metadata
@@ -269,7 +271,7 @@ def create_study_folders(hybrid_folder, study_base_folder, verbose=True, debug_c
 
         # cases is dumped to a pickle file, json is not possible because of the tuple key
         if verbose:
-            print(f"Found {len(cases)} cases for session {session_name}")
+            logging.info(f"Found {len(cases)} cases for session {session_name}")
         (session_study_folder / "cases.pickle").write_bytes(pickle.dumps(cases))
 
         study_dict[session_name]["folder"] = session_study_folder
@@ -372,9 +374,45 @@ def compute_additional_metrics(study, metric_names):
     
 
 
-if __name__ == "__main__":
-    # Use CO_CPUS/SLURM_CPUS_ON_NODE env variable if available
-    N_JOBS_EXT = os.getenv("CO_CPUS") or os.getenv("SLURM_CPUS_ON_NODE")
+def run() -> None:
+    if not PARAMS_FILE.is_file():
+        raise ValueError(f"Params file not found: {PARAMS_FILE}")
+    with open(PARAMS_FILE, "r") as f:
+        full_params = json.load(f)
+    hybrid_evaluation_params = full_params["hybrid_evaluation"]
+    LOGGING = full_params.get("logging", None)
+
+    # setup logging before any other logging call
+    if LOGGING is None:
+        logging.basicConfig(level="INFO", stream=sys.stdout, format="%(message)s")
+    else:
+        if LOGGING["package"] == "logging":
+            logging_cfg = LOGGING.get("logging_cfg", {})
+            logging.basicConfig(stream=sys.stdout, **logging_cfg)
+        elif LOGGING["package"] == "log-schema":
+            import log_schema
+
+            pipeline_name = LOGGING.get("pipeline_name", "AIND Ephys Hybrid Benchmark")
+            acquisition_name = LOGGING.get("acquisition_name", "unknown")
+
+            config = LOGGING.get("logging_cfg")
+            if config is not None and len(config) == 0:
+                config = None
+            log_schema.setup_logging(
+                config=config,
+                model={
+                    "pipeline_name": pipeline_name,
+                    "acquisition_name": acquisition_name,
+                    "process_name": "Hybrid Evaluation"
+                }
+            )
+
+    logging.info("Begin processing...", extra={"event_type": "stage_start"})
+
+    DEBUG_CASES = hybrid_evaluation_params.get("debug_cases", None)
+
+    # Use CO_CPUS/N_JOBS_EXT env variable if available
+    N_JOBS_EXT = os.getenv("CO_CPUS") or os.getenv("N_JOBS_EXT")
     N_JOBS = int(N_JOBS_EXT) if N_JOBS_EXT is not None else -1
     si.set_global_job_kwargs(n_jobs=N_JOBS, progress_bar=False)
 
@@ -394,7 +432,7 @@ if __name__ == "__main__":
                 break
 
     assert hybrid_folder is not None, "Couldn't find hybrid folder"
-    print(f"Hybrid folder: {hybrid_folder}")
+    logging.info(f"Hybrid folder: {hybrid_folder}")
 
     # Copy figures and motion folders
     figures_output_folder = results_folder / "figures"
@@ -417,14 +455,14 @@ if __name__ == "__main__":
     dataframes = {}
 
     for session_name, study_dict_session in study_dict.items():
-        print(f"\nGenerating results for session {session_name}")
+        logging.info(f"\nGenerating results for session {session_name}")
         session_study_folder = study_dict_session["folder"]
         session_duration = study_dict_session["duration"]
         probe_model_name = study_dict_session["probe_model_name"]
         
         study = SorterStudy(session_study_folder)
 
-        print(f"\tPlotting results")
+        logging.info(f"\tPlotting results")
         # motion
         case_keys = list(study.cases.keys())
 
@@ -461,7 +499,7 @@ if __name__ == "__main__":
         fig_snr.savefig(benchmark_folder / "performance_snr.pdf")
         skip_metrics = False
 
-        print("\tCopying dataframes")
+        logging.info("\tCopying dataframes")
         dataframes_folder = results_folder / "dataframes" / session_name
         dataframes_folder.mkdir(exist_ok=True, parents=True)
         unit_counts = study.get_count_units()
@@ -479,7 +517,7 @@ if __name__ == "__main__":
             template_amps = si.get_template_extremum_amplitude(analyzer, mode="peak_to_peak")
             metrics.loc[case_key, "amplitude"] = np.array(list(template_amps.values()))
 
-        print(f"\tComputing additional metrics")
+        logging.info(f"\tComputing additional metrics")
         metrics_sorted, metrics_matched = compute_additional_metrics(study, metrics_to_compute)
         metrics.to_csv(dataframes_folder / "metrics_gt.csv")
         if metrics_sorted is not None:
@@ -487,7 +525,7 @@ if __name__ == "__main__":
         if metrics_matched is not None:
             metrics_matched.to_csv(dataframes_folder / "metrics_matched.csv")
     
-        print("\tCopying motion folders and figures")
+        logging.info("\tCopying motion folders and figures")
         for fig_file in fig_files:
             # file name is "fig-{type}"
             fig_file_split = fig_file.name.split("_")
@@ -513,7 +551,7 @@ if __name__ == "__main__":
                     stream_name = stream_name.replace(f"{session_name}__", "")
                 shutil.copytree(motion_folder, motion_output_folder / stream_name)
 
-        print(f"\tSession duration: {session_duration} - Probe model: {probe_model_name}")
+        logging.info(f"\tSession duration: {session_duration} - Probe model: {probe_model_name}")
         csvs = [p for p in dataframes_folder.iterdir() if p.suffix == ".csv"]
         for csv_file in csvs:
             df_name = csv_file.stem
@@ -528,7 +566,7 @@ if __name__ == "__main__":
                 dataframes[df_name] = pd.concat([dataframes[df_name], df])
 
     # Aggregated results
-    print("Aggregating results")
+    logging.info("Aggregating results")
     performance_metrics = ["accuracy", "precision", "recall"]
     aggregated_results_folder = results_folder / "aggregated"
     df_units = pd.merge(dataframes["performances"], dataframes["metrics_gt"])
@@ -611,7 +649,7 @@ if __name__ == "__main__":
                 popt = fit_sigmoid(xdata, ydata, p0=p0)
                 ax.plot(xdata, sigmoid(xdata, *popt), color=f"C{i}", lw=2)
             except Exception as e:
-                print(f"\tFailed to fit sigmoid for {metric} - {sorting_case}:\n{e}")
+                logging.info(f"\tFailed to fit sigmoid for {metric} - {sorting_case}:\n{e}")
     axes[0].set_ylabel("Value")
     axes[1].set_xlabel("SNR")
     sns.despine(fig_snr)
@@ -639,7 +677,7 @@ if __name__ == "__main__":
                 popt = fit_sigmoid(xdata, ydata, p0=p0)
                 ax.plot(xdata, sigmoid(xdata, *popt), color=colors[sorting_case], lw=2)
             except Exception as e:
-                print(f"\tFailed to fit sigmoid for {metric} - {sorting_case}:\n{e}")
+                logging.info(f"\tFailed to fit sigmoid for {metric} - {sorting_case}:\n{e}")
     axes[0].set_ylabel("Value")
     axes[1].set_xlabel("Amplitude ($\mu$V)")
     sns.despine(fig_amp)
@@ -718,5 +756,13 @@ if __name__ == "__main__":
                 sns.despine(fig_metric)
                 fig_metric.savefig(figures_folder / f"{metric_name}_{sorting_case1}_vs_{sorting_case2}.png", transparent=True, dpi=300)
 
-    print("DONE!")
+    logging.info("DONE!")
+    logging.info("Pipeline stage completed", extra={"event_type": "stage_complete"})
 
+
+if __name__ == "__main__":
+    try:
+        run()
+    except Exception as e:
+        logging.exception("Pipeline stage failed", extra={"event_type": "stage_error"})
+        raise
